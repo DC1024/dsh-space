@@ -37,6 +37,7 @@ services:
       DSH_DESKTOP_BASE: "http://${DESKTOP_HOST}:19990"
       DSH_ANDROID_BASE: "http://${DESKTOP_HOST}:19992"
       DSH_ANDROID_TOKEN_FILE: "data/android.token"
+      NODE_PATH: "/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules"
     mem_limit: 2g
     security_opt:
       - no-new-privileges:true

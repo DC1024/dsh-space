@@ -6,7 +6,7 @@ cd /opt/dsh-space
 mkdir -p data workdir
 # The runtime RPC helper imports js-yaml; make the runtime's node_modules resolvable.
 if [ ! -e node_modules ]; then
-    ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules node_modules
+    ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules node_modules 2>/dev/null || true
 fi
 export PYTHONUNBUFFERED=1
 

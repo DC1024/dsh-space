@@ -28,7 +28,9 @@ cp ../../space/config.example.json ../../space/config.json
 # 编辑 ../../space/config.json：时区、预算、人格、desktop.base_url、permission_preset
 
 mkdir -p data workdir
-sudo chown -R 1000:1000 data workdir
+sudo chown -R 1000:1000 data workdir ../../space
+# 控制台会写 config.json / data/，所以 ../../space 也要让 UID 1000 可写；
+# 如果你用别的 UID 运行容器，把 user: "1000:1000" 改成同一个 UID。
 
 docker compose -f docker-compose.example.yml up -d --build
 docker logs -f dsh-space
