@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小鲸鱼 · 专属空间</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/dual-layout.css">
+<link rel="stylesheet" href="/panes.css">
+<link rel="stylesheet" href="/settings.css">
+<link rel="stylesheet" href="/persona-switch.css">
+<link rel="stylesheet" href="/nav-pages.css">
+<script defer src="/uuid-polyfill.js">
+</script>
+<script defer src="/app-v02.js">
+</script>
+<script defer src="/panes.js">
+</script>
+<script defer src="/settings.js">
+</script>
+<script defer src="/nav-pages.js">
+</script>
+<script defer src="/schedule.js">
+</script>
+<script defer src="/phone-panel.js">
+</script>
+</head>
+<body>
+<div class="shell">
+<header class="topbar">
+<div class="brand">
+<span class="brand-mark">D</span>
+<div>小鲸鱼<small>DSH PERSONAL SPACE</small>
+</div>
+</div>
+<nav>
+<a href="#home" class="active">◈ <span>空间总览</span>
+</a>
+<a href="#memory">▤ <span>长期记忆</span>
+</a>
+<a href="#requests">◇ <span>需要你决定</span>
+<b id="requestCount">0</b>
+</a>
+<a href="#activity">◷ <span>活动记录</span>
+</a>
+<a href="#schedule">⏱ <span>定时任务</span>
+</a>
+<!-- Replace 192.168.1.10 with your gateway host/IP before deployment. -->
+<a href="http://192.168.1.10:18082/vnc.html" target="_blank" rel="noopener" title="打开她的实时屏幕（VNC，可接管鼠标键盘）">▣ <span>远程 VNC</span>
+</a>
+<a href="#settings" data-settings="permission" title="设置：权限、接口、人设">⚙ <span>设置</span>
+</a>
+</nav>
+<div class="topbar-bottom">
+<span class="local-dot">
+</span>仅在这台电脑保存<p id="version">本地空间 · v0.1.0</p>
+<button id="export" class="quiet">导出记忆与记录 ↗</button>
+</div>
+</header>
+<main id="home">
+<header>
+<div>
+<p class="eyebrow">一个可以停留、探索和被理解的地方</p>
+<h1>欢迎回到小鲸鱼的空间<span class="soft">。</span>
+</h1>
+</div>
+<div class="connection">
+<i id="liveDot">
+</i>
+<span id="connection">连接中</span>
+</div>
+</header>
+<section class="overview">
+<section class="status-strip">
+<div>
+<span class="dot amber" id="stateDot">
+</span>
+<strong id="state">正在读取状态</strong>
+<small id="stateHint">先把家安顿好，再开始探索</small>
+</div>
+<div class="actions">
+<button id="reasonToggle" class="quiet">打开思考小窗</button>
+<button id="pause">暂停活动</button>
+<button id="resume" class="primary" disabled>自主活动未开放</button>
+</div>
+</section>
+<div class="metrics">
+<section class="mini">
+<span>人格来源</span>
+<strong id="persona">读取中</strong>
+<small id="personaHint">版本与来源独立记录</small>
+</section>
+<section class="mini">
+<span>长期记忆</span>
+<strong>
+<b id="memoryCount">0</b> <em>条</em>
+</strong>
+<small>保留来源，纠正时保留原记录</small>
+</section>
+<section class="mini">
+<span>今日费用记录</span>
+<strong id="cost">—</strong>
+<small id="costHint">核对共享账本前不调用模型</small>
+</section>
+<section class="mini">
+<span>空间总额度与占用</span>
+<strong id="storage">—</strong>
+<small id="free">正在读取磁盘</small>
+<small id="storageBreakdown">根目录与手机数据分别统计</small>
+<small id="storageHeadroom">安全余量核对中</small>
+<small id="storageVm">虚拟盘逻辑容量另行核对</small>
+</section>
+</div>
+</section>
+<div id="uncertainTasks" role="status">
+</div>
+<div class="workspace">
+<div class="rail">
+<section class="persona-bar" aria-label="表里人格切换">
+<div>
+<strong id="activePersonaLabel">表人格</strong>
+<p id="personaBoundary">表、里共用记忆；每件事保留执行者、记录者和来源。</p>
+</div>
+<div class="persona-buttons" role="group" aria-label="选择人格">
+<button id="parallelToggle" type="button" aria-pressed="false">表里并发 · 关闭</button>
+<button id="personaBiao" type="button" aria-pressed="true">表人格</button>
+<button id="personaLi" type="button" aria-pressed="false">里人格</button>
+</div>
+</section>
+<section class="device-summary">
+<video id="petVideo" autoplay loop muted playsinline src="/assets/pet/待机呼吸休闲.webm">
+</video>
+<div>
+<strong>小鲸鱼在自己的空间里</strong>
+<p id="phoneState">正在检查手机连接</p>
+<p id="deviceState">正在检查电脑连接</p>
+<p id="deviceLeaseState">设备操作顺序执行</p>
+<a href="/permissions" target="_blank" rel="noopener">查看权限约束</a> · <a href="/api/phone-frame" target="_blank" rel="noopener">查看最近手机画面</a>
+</div>
+</section>
+<section class="panel desktop-panel">
+<div class="panel-head">
+<div>
+<span class="eyebrow">HER DESKTOP</span>
+<h2>她的桌面</h2>
+</div>
+<span class="pill" id="desktopBadge">待接入</span>
+</div>
+<div class="desktop" id="desktop">
+<img id="desktopFrame" alt="最近一次专属虚拟机画面" hidden>
+<div class="desktop-empty" id="desktopEmpty">
+<div class="window-symbol">▱</div>
+<h3>她的电脑尚未连接</h3>
+<p>需要电脑任务时会连接专属 Windows。<br>一般任务先使用手机；已有记录和最近画面会保留。</p>
+<a href="#requests">查看安装记录 <span>→</span>
+</a>
+</div>
+<span class="desktop-caption">专属 Windows · 按需连接 · 最近画面</span>
+</div>
+<div class="desktop-footer">
+<span id="resource">读取电脑空闲状态…</span>
+<span>自主活动关闭 · 新安装需允许</span>
+</div>
+</section>
+<section class="panel" id="phonePanel">
+<div class="panel-head">
+<div>
+<span class="eyebrow">HER PHONE</span>
+<h2>她的手机</h2>
+</div>
+<span class="pill" id="phoneBadge">ADB 直连</span>
+</div>
+<div class="phone-frame">
+<img id="phoneShot" alt="她手机的最近一张画面">
+</div>
+<div class="desktop-footer">
+<span id="phoneMeta">正在取画面…</span>
+<button id="phoneRefresh" class="quiet" type="button">刷新画面</button>
+</div>
+</section>
+<section class="panel" id="storageConsult">
+<div class="panel-head">
+<div>
+<span class="eyebrow">ROOM TO GROW</span>
+<h2>请她评估扩容</h2>
+</div>
+<span class="muted">仅评估与提案，不是批准</span>
+</div>
+<p>低空间或活动暂停时也可提出这项受限任务；只查询容量和申请，最多两次模型请求，仍使用原预算与观察检查。</p>
+<form id="storageConsultForm" class="memory-form">
+<label for="storageTarget">希望评估的总额度（GiB）</label>
+<input id="storageTarget" type="number" min="1" max="1048576" step="1" required>
+<input id="storageReason" maxlength="1200" placeholder="扩容用途，可留空" aria-label="扩容用途">
+<button type="submit">请她只评估这一目标</button>
+</form>
+</section>
+</div>
+<div class="center">
+<section id="dualPanes" class="dual-wrap" aria-label="表里工作台">
+</section>
+<section class="panel conversation legacy">
+<div class="panel-head">
+<div>
+<span class="eyebrow">STAY IN TOUCH</span>
+<h2>和她一起做事</h2>
+</div>
+<span class="pill">Flash · 自动思考</span>
+</div>
+<div class="live-now idle" id="liveNow" role="status" aria-live="polite">
+<div class="live-row">
+<i class="live-dot"></i>
+<strong id="liveHeadline">她还没开始新任务</strong>
+<span id="liveMeta">—</span>
+<button id="jumpLatest" class="live-jump" type="button" hidden>回到最新 ↓</button>
+</div>
+<p class="live-sub"><span id="liveAction">最近动作：尚未开始</span></p>
+<p class="live-sub"><span id="liveThink">思考：尚未接通</span></p>
+</div>
+<div class="messages" id="messages">
+<div class="welcome">
+<span>✦</span>
+<p>先留一句话吧。<br>
+<small>会保存在这里，任务和记忆保存在她自己的空间。</small>
+</p>
+</div>
+</div>
+<form id="chatForm">
+<label class="sr-only" for="chat">留言</label>
+<textarea id="chat" placeholder="想说的话、一起做的事…" rows="3" maxlength="24000" required>
+</textarea>
+<div class="compose-footer">
+<select id="taskTarget" aria-label="任务执行端">
+<option value="assistant">手机优先 · 按需电脑</option>
+<option value="phone">她的手机</option>
+<option value="desktop">专属 Windows（排队使用）</option>
+<option value="dialogue">只对话与记忆</option>
+</select>
+<small>每条新任务使用新上下文；旧记录按需检索</small>
+<button class="primary" type="submit">保存留言 ↑</button>
+</div>
+</form>
+</section>
+</div>
+<aside class="side-rail">
+<section class="panel memory-panel" id="memory">
+<div class="panel-head">
+<div>
+<span class="eyebrow">WHAT SHE REMEMBERS</span>
+<h2 id="memoryTitle">表人格的长期记忆</h2>
+</div>
+<input id="search" type="search" placeholder="查找一段记忆…" aria-label="查找记忆">
+</div>
+<div class="mem-view-bar">
+<span class="mem-view-label">看谁的视角</span>
+<div class="mem-view-switch" role="group" aria-label="切换记忆视角">
+<button id="memViewBiao" type="button" data-view="biao" aria-pressed="true">表人格</button>
+<button id="memViewLi" type="button" data-view="li" aria-pressed="false">里人格</button>
+<button id="memViewAll" type="button" data-view="all" aria-pressed="false">全部</button>
+</div>
+</div>
+<div id="memoryList" class="memory-list">
+</div>
+<form id="memoryForm" class="memory-form">
+<select id="memoryKind" aria-label="记忆类型">
+<option value="preference">偏好与习惯</option>
+<option value="experience">共同经历</option>
+<option value="relationship">关系与约定</option>
+<option value="project">正在做的事</option>
+<option value="interest">兴趣</option>
+<option value="correction">纠正记录</option>
+</select>
+<select id="memoryPerformed" aria-label="谁实际做的">
+<option value="unknown">执行者尚不明确</option>
+<option value="biao">表做的</option>
+<option value="li">里做的</option>
+<option value="owner">主人做的</option>
+</select>
+<input id="memoryText" placeholder="添加一条你希望她记住的事" aria-label="记忆内容" maxlength="12000" required>
+<button type="submit">保存记忆</button>
+</form>
+</section>
+<section class="panel" id="sharedActivity">
+<div class="panel-head">
+<div>
+<span class="eyebrow">SHARED ACTION RECEIPTS</span>
+<h2>彼此做过什么</h2>
+</div>
+<span class="muted">双方可读 · 原始回执保留；当前规则见权限约束</span>
+</div>
+<div id="sharedActions" class="event-list">
+<p class="empty">还没有实际行动回执。</p>
+</div>
+</section>
+<section class="panel" id="requests">
+<div class="panel-head">
+<div>
+<span class="eyebrow">YOUR SAY</span>
+<h2>需要你决定</h2>
+</div>
+<span class="muted">以下保留当时的审批说明；当前情况以连接和执行回执为准</span>
+</div>
+<div id="approvalList">
+</div>
+</section>
+<section class="panel" id="activity">
+<div class="panel-head">
+<div>
+<span class="eyebrow">A TRACE OF HER DAY</span>
+<h2>活动记录</h2>
+</div>
+<span class="muted">真实事件 · 按顺序保存</span>
+</div>
+<div id="eventList" class="event-list">
+</div>
+</section>
+</aside>
+</div>
+<footer>人格、记忆、行动分开保存。这里的状态会如实显示，准备完成前不会自动做事。</footer>
+</main>
+</div>
+<section class="reason-window" id="reasonWindow" aria-label="模型思考观察窗">
+<div class="reason-title" id="reasonHandle">
+<div>
+<span class="dot">
+</span>
+<strong>思考观察窗</strong>
+<small id="reasonModel">DeepSeek Flash · 待连接</small>
+</div>
+<button id="reasonClose" aria-label="收起思考窗">−</button>
+</div>
+<div class="reason-info">仅显示模型接口实际返回的思考文本；请求使用中文。没有返回时不会补写。</div>
+<div id="reasonText" class="reason-text">
+<p class="muted">尚未接通真实思考流。<br>连接后，原文会在生成过程中逐段显示。</p>
+</div>
+<form id="correctionForm">
+<label for="correction">发现问题，可以在这里帮她纠正</label>
+<textarea id="correction" placeholder="告诉她哪里理解错了…" rows="2" maxlength="12000" required>
+</textarea>
+<button type="submit">纠正并暂停</button>
+<small id="correctionState">纠正后，等她说明新理解，再由你允许继续。</small>
+</form>
+</section>
+<dialog id="parallelDialog" aria-labelledby="parallelTitle">
+<form method="dialog">
+<h2 id="parallelTitle">启用表里并发？</h2>
+<p id="parallelExplain">小鲸鱼的表、里人格可以同时处理各自任务，记忆共用并标注归属，对话会话分别保存。</p>
+<ul>
+<li>费用共用同一份预算。</li>
+<li>同一 Windows 桌面的任务按顺序执行。</li>
+<li>暂停活动会同时停止两边。</li>
+</ul>
+<p>当前自主活动关闭；确认只改变协作模式，开始任务仍需单独授权。</p>
+<div class="actions">
+<button value="cancel" autofocus>取消</button>
+<button id="parallelConfirm" class="primary" value="confirm">确认启用</button>
+</div>
+</form>
+</dialog>
+<dialog id="storageDialog" aria-labelledby="storageConfirmTitle">
+<form method="dialog">
+<h2 id="storageConfirmTitle">确认这项扩容申请？</h2>
+<p id="storageConfirmId">
+</p>
+<p id="storageConfirmReason">
+</p>
+<p id="storageConfirmUsage">
+</p>
+<p id="storageConfirmSafety">
+</p>
+<p id="storageConfirmVm">
+</p>
+<p>只允许这一申请和固定目标；不预占磁盘，不恢复暂停，也不删除或迁移原资料。</p>
+<div class="actions">
+<button value="cancel" autofocus>取消</button>
+<button id="storageConfirm" class="primary" value="confirm">确认允许</button>
+</div>
+</form>
+</dialog>
+<div id="toast" role="status" aria-live="polite">
+</div>
+</body>
+</html>

@@ -1,0 +1,11 @@
+/* Table/inside workbench layout: two conversation panes replace the single
+   middle column of the console. Kept separate from style.css so the legacy
+   conversation stays intact for pages that do not load panes.js. */
+.center{display:flex;flex-direction:column;min-height:0}
+#dualPanes.dual-wrap{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+body[data-dual="on"] .center>.conversation.legacy{display:none!important}
+/* 只有真的很窄（约等于一窗两页里的空间栏）才上下叠；1180 宽时并排两栏仍然放得下，
+   否则两张对话会被压成两条细缝，谁也没法读。 */
+@media (max-width:960px){
+  #dualPanes.dual-wrap{grid-template-columns:minmax(0,1fr);grid-auto-rows:minmax(0,1fr);overflow-y:auto}
+}

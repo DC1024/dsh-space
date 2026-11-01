@@ -1,0 +1,178 @@
+/* 主人设置：权限 · API 接口 · 人设提示词
+   形状照 DSH 官方设置页：左侧分组列表 + 右侧单页内容 + 暂存/保存栏 + 已覆盖/恢复默认。
+   配色沿用本空间控制台（暖绿/米白），不另起一套主题。 */
+
+.sp-overlay{position:fixed;inset:0;z-index:80;display:grid;grid-template-rows:auto minmax(0,1fr);background:var(--bg)}
+.sp-overlay[hidden]{display:none}
+body.sp-open{overflow:hidden}
+
+.sp-head{display:flex;align-items:center;gap:16px;padding:13px 22px;border-bottom:1px solid var(--line);background:var(--surface)}
+.sp-head .sp-title{display:flex;align-items:baseline;gap:10px;min-width:0}
+.sp-head strong{font-size:15px;letter-spacing:.2px}
+.sp-head .sp-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-head .sp-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sp-close{border:1px solid var(--line);background:transparent;border-radius:9px;width:32px;height:32px;display:grid;place-items:center;font-size:16px;color:var(--muted)}
+.sp-close:hover{background:#e9edf3;color:var(--ink)}
+
+.sp-body{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:0}
+.sp-nav{position:relative;border-right:1px solid var(--line);background:#e8ebf0;padding:14px 10px;overflow:auto}
+.sp-nav-label{font-size:10px;letter-spacing:1.4px;color:var(--muted);padding:6px 10px 8px}
+.sp-nav button{display:grid;grid-template-columns:18px 1fr;gap:9px;align-items:center;width:100%;text-align:left;border:1px solid transparent;background:transparent;border-radius:10px;padding:9px 11px;margin-bottom:3px;color:#5f666f;font-size:13px}
+.sp-nav button>i{font-style:normal;font-size:13px;opacity:.75}
+.sp-nav button:hover{background:#dfe7ec;color:var(--ink)}
+.sp-nav button[aria-current="true"]{background:#dce3e8;border-color:#cfd8df;color:var(--ink);font-weight:600}
+.sp-nav button small{display:block;font-size:10px;font-weight:400;color:var(--muted);margin-top:1px}
+.sp-nav .sp-dirty-dot{display:none;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-left:auto;grid-column:3}
+.sp-nav button.dirty .sp-dirty-dot{display:block}
+.sp-nav-foot{padding:12px 12px 4px;font-size:10px;line-height:1.6;color:#7d838b;border-top:1px solid #dce4e9;margin-top:12px}
+
+.sp-main{overflow:auto;padding:22px 30px 96px;min-height:0}
+.sp-wrap{max-width:880px}
+.sp-section-head{margin-bottom:16px}
+.sp-section-head h2{font-size:19px;font-weight:600;margin:0 0 5px}
+.sp-section-head p{font-size:12px;color:var(--muted);margin:0;max-width:66ch}
+
+.sp-card{border:1px solid var(--line);border-radius:14px;background:var(--surface);margin-bottom:16px;overflow:hidden}
+.sp-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:15px 20px 13px;border-bottom:1px solid #e9ecf1}
+.sp-card>header h3{font-size:13px;font-weight:600;margin:0}
+.sp-card>header p{font-size:11px;color:var(--muted);margin:3px 0 0}
+.sp-card>header .sp-tag{font-size:10px;color:#6f7c86;border:1px solid #d7dfe5;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.sp-card .sp-body-inner{padding:4px 20px 16px}
+.sp-note{padding:12px 20px;font-size:11px;color:#6f757d;background:#f1f4f8;border-top:1px solid #e9ecf1}
+
+.sp-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:start;padding:13px 20px;border-top:1px solid #e9ecf1}
+.sp-row:first-child{border-top:0}
+.sp-row.sp-row-locked{background:#f7f9fc}
+.sp-label{font-size:13px;line-height:1.45}
+.sp-label .sp-overridden{display:inline-block;font-size:9px;line-height:1.6;border:1px solid #d3dce2;border-radius:20px;padding:0 7px;margin-left:7px;color:#6f7d87;vertical-align:1px}
+.sp-label .sp-locked{display:inline-block;font-size:9px;line-height:1.6;border-radius:20px;padding:0 7px;margin-left:7px;color:#8a7a4e;background:#f6f1e2;border:1px solid #eadfc0;vertical-align:1px}
+.sp-label .sp-wired{display:inline-block;font-size:9px;line-height:1.6;border-radius:20px;padding:0 7px;margin-left:7px;color:#3f506b;background:#e8edf2;border:1px solid #cfd9e2;vertical-align:1px}
+.sp-desc{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6}
+.sp-src{font-size:10px;color:#6f7680;margin-top:5px}
+.sp-src a{color:#5b6573;text-decoration:underline;text-underline-offset:2px}
+.sp-reset{border:0;background:none;color:var(--green);font-size:11px;padding:0 0 0 8px;text-decoration:underline;text-underline-offset:2px}
+.sp-reset:hover{color:#283a58}
+.sp-ctrl{display:flex;align-items:center;gap:8px;padding-top:2px}
+.sp-value{font-size:12px;color:#4e555f;text-align:right;max-width:280px;word-break:break-word}
+
+/* 开关（照 DSH 的紧凑行内开关） */
+.sp-switch{position:relative;width:40px;height:22px;flex:none}
+.sp-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.sp-switch span{position:absolute;inset:0;border-radius:20px;background:#d5dde2;transition:background .15s ease}
+.sp-switch span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #242d3a26;transition:transform .15s ease}
+.sp-switch input:checked+span{background:var(--green)}
+.sp-switch input:checked+span::after{transform:translateX(18px)}
+.sp-switch input:disabled+span{opacity:.45}
+.sp-switch input:focus-visible+span{outline:2px solid #6f7b8f;outline-offset:2px}
+.sp-switch input:disabled{cursor:not-allowed}
+
+/* DSH 同款四档权限预设 */
+.sp-preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 20px 6px}
+.sp-preset{border:1px solid #d7dfe5;border-radius:11px;padding:10px 11px;text-align:left;background:#f8fafc;display:flex;flex-direction:column;gap:3px;min-height:74px;white-space:normal}
+.sp-preset:hover:not(:disabled){background:#eef2f7;border-color:#c8d4dc}
+.sp-preset[aria-pressed="true"]{border-color:var(--green);background:#eaeef4;box-shadow:inset 0 0 0 1px var(--green)}
+/* 不可选档位：不整体压透明度（压了字就发灰看不清），只把底色和边框收暗，正文留住 */
+.sp-preset:disabled{opacity:1;cursor:not-allowed;background:#f2f4f8;border-color:#e0e5eb}
+.sp-preset:disabled strong{color:#4c525a}
+.sp-preset:disabled small{color:#6f757d}
+.sp-preset:disabled em{color:#7d6f47;background:#f3edd9;border-color:#e3d7b2}
+.sp-preset strong{font-size:12px;font-weight:600}
+.sp-preset em{font-style:normal;font-size:9px;letter-spacing:.6px;color:#8a7a4e;background:#f6f1e2;border:1px solid #eadfc0;border-radius:5px;padding:0 5px;align-self:flex-start}
+.sp-preset small{font-size:10px;color:var(--muted);line-height:1.5}
+.sp-preset-hint{font-size:11px;color:var(--muted);padding:2px 20px 14px;line-height:1.65}
+
+/* 表单 */
+.sp-field{display:grid;gap:6px;padding:12px 20px}
+.sp-field label{font-size:12px;color:#4e555f}
+.sp-field .sp-help{font-size:10px;color:var(--muted)}
+.sp-field .sp-off{font-size:10px;color:#8a7a4e}
+.sp-field input[type=text],.sp-field input[type=number],.sp-field select,.sp-field textarea{width:100%;border:1px solid #d7dfe5;border-radius:9px;background:#fafbfd;padding:8px 11px;font-size:12px;color:var(--ink)}
+.sp-field input:focus,.sp-field select:focus,.sp-field textarea:focus{border-color:#a4b3bf;outline:2px solid #cad6e0;outline-offset:0}
+.sp-field input:disabled,.sp-field select:disabled{background:#eff2f6;color:#7c8289}
+
+/* 表格 */
+.sp-table{width:100%;border-collapse:collapse;font-size:12px}
+.sp-table th{font-size:10px;letter-spacing:.8px;color:var(--muted);font-weight:500;text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);background:#f3f5f9}
+.sp-table td{padding:9px 12px;border-bottom:1px solid #e9ecf1;vertical-align:top}
+.sp-table tr:last-child td{border-bottom:0}
+.sp-code{font-family:Consolas,Menlo,monospace;font-size:11px;background:#eceff4;border:1px solid #dde6eb;border-radius:5px;padding:1px 6px;white-space:nowrap}
+.sp-method{font-family:Consolas,Menlo,monospace;font-size:10px;border-radius:5px;padding:1px 6px;border:1px solid #d7dfe5;background:#f3f5f9;color:#5c636d}
+.sp-method.get{color:#3f506b;border-color:#cfd9e2;background:#e8edf2}
+.sp-method.post{color:#8a6b2f;border-color:#eadfc0;background:#f6f1e2}
+.sp-ok{color:#3f506b}
+.sp-bad{color:#a04a3f}
+.sp-dim{color:#8d939a}
+.sp-copy{border:1px solid #d7dfe5;background:#fffefa;border-radius:7px;padding:2px 8px;font-size:10px;color:#636a74}
+.sp-copy:hover{background:#e8edf3}
+.sp-self{border:1px solid #d1d8dd;background:#fffefa;border-radius:7px;padding:3px 9px;font-size:10px;color:#4e555f;white-space:nowrap}
+.sp-self:hover{background:#e9edf3}
+.sp-self:disabled{opacity:.5;cursor:wait}
+
+/* 人设提示词 */
+.sp-prompt-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid #e9ecf1;background:#f3f5f9}
+.sp-prompt-toolbar .sp-meta{font-size:10px;color:var(--muted);margin-left:auto;text-align:right;line-height:1.6}
+.sp-prompt{padding:14px 20px 4px}
+.sp-prompt textarea{width:100%;min-height:min(52vh,520px);font-family:Consolas,"Microsoft YaHei",monospace;font-size:12px;line-height:1.72;padding:13px 15px;border:1px solid #d7dfe5;border-radius:10px;background:#fafbfd;color:var(--ink);resize:vertical;tab-size:2}
+.sp-prompt textarea:focus{border-color:#a4b3bf;outline:2px solid #cad6e0;outline-offset:0}
+.sp-prompt-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 20px 16px;font-size:11px;color:var(--muted)}
+.sp-prompt-foot .sp-count{margin-left:auto;font-variant-numeric:tabular-nums}
+.sp-prompt-foot .sp-warn{color:#8a6b2f}
+.sp-diffstat{font-size:10px;color:#6f757d}
+
+/* 底部暂存栏（DSH 的保存栏：只在有改动时出现） */
+.sp-savebar{position:fixed;left:0;right:0;bottom:0;z-index:81;display:none;align-items:center;gap:14px;padding:11px 26px;background:#fffefa;border-top:1px solid var(--line);box-shadow:0 -8px 24px #242d3a0f}
+.sp-savebar.show{display:flex}
+.sp-savebar .sp-save-hint{font-size:12px;color:#4e555f}
+.sp-savebar .sp-save-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sp-savebar .sp-err{font-size:11px;color:#a04a3f;max-width:52ch}
+
+/* 提示气泡 */
+.sp-toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%) translateY(8px);z-index:82;background:#242b3a;color:#f1f4f8;border-radius:10px;padding:9px 16px;font-size:12px;box-shadow:0 12px 32px #242d3a33;opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;max-width:min(74vw,640px)}
+.sp-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* 二次确认（完全权限/自主探索/对外动作这类） */
+.sp-confirm{width:min(520px,92vw);border:1px solid var(--line);border-radius:16px;padding:0;background:var(--surface);color:var(--ink);box-shadow:0 24px 70px #242d3a40}
+.sp-confirm::backdrop{background:#242d3a33}
+.sp-confirm form{padding:22px 24px 18px}
+.sp-confirm h2{font-size:17px;margin:0 0 9px}
+.sp-confirm p{font-size:12px;color:#545b65;margin:0 0 10px;line-height:1.7}
+.sp-confirm ul{margin:0 0 14px;padding-left:18px;font-size:12px;color:#545b65;line-height:1.75}
+.sp-confirm .sp-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.sp-confirm .sp-danger{background:#8a4a3f;border-color:#8a4a3f;color:#fff}
+.sp-confirm .sp-danger:hover{background:#743c33}
+
+/* 只读参考：权限约束全文入口 */
+.sp-constraint{border:1px solid var(--line);border-radius:12px;background:#f3f5f9;padding:13px 16px;font-size:11px;color:#636a74;display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
+.sp-constraint strong{font-size:11px;color:#4e555f;display:block;margin-bottom:3px}
+.sp-constraint a{white-space:nowrap;margin-left:auto}
+
+/* 补充类：原先写在 el() 的内联 style 上，CSP（style-src 'self'）会拦掉，改成类 */
+a.sp-self{display:inline-block;text-decoration:none}
+.sp-link{text-decoration:none}
+.sp-btn-primary{background:#3f506b;border-color:#3f506b;color:#fff;padding:6px 15px;font-size:12px;border-radius:8px}
+.sp-btn-primary:hover{background:#34435a}
+.sp-btn-primary:disabled{opacity:.55;cursor:wait}
+.sp-note-warn{color:#8a6b2f}
+.sp-tiny{font-size:10px}
+.sp-ml{margin-left:6px}
+
+/* 新手教程：四步卡片，编号醒目，条目用列表而不是长段落 */
+.sp-guide-step header h3{display:flex;align-items:center;gap:9px;font-size:14px}
+.sp-guide-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:0 0 auto;border-radius:50%;background:#3f506b;color:#fff;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.sp-guide-list{margin:0;padding:2px 18px 14px 34px;font-size:12px;line-height:1.8;color:#4e555f}
+.sp-guide-list li{margin:0 0 7px}
+.sp-guide-list li:last-child{margin-bottom:0}
+.sp-guide-foot{display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap;margin:2px 0 10px;padding:13px 16px;border:1px dashed #bac8d2;border-radius:12px;background:#f3f5f9}
+
+@media (max-width:900px){
+  .sp-body{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .sp-nav{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:9px}
+  .sp-nav-label,.sp-nav-foot{display:none}
+  .sp-nav button{width:auto;white-space:nowrap;margin:0 4px 0 0}
+  .sp-nav button small{display:none}
+  .sp-main{padding:16px 14px 92px}
+  .sp-preset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sp-row{grid-template-columns:1fr;gap:9px}
+  .sp-ctrl{justify-content:flex-start}
+  .sp-savebar{padding:10px 14px;flex-wrap:wrap}
+}

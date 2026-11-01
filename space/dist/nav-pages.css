@@ -1,0 +1,48 @@
+/* 导航页：把右栏里的面板变成可以进入的整页；总览仍保持原来的三栏。 */
+body[data-page]:not([data-page="home"]) main#home>header,
+body[data-page]:not([data-page="home"]) main#home>.overview,
+body[data-page]:not([data-page="home"]) main#home>#uncertainTasks,
+body[data-page]:not([data-page="home"]) main#home>.workspace{display:none!important}
+body[data-page]:not([data-page="home"]) main#home{padding-bottom:26px}
+#pageHost[hidden]{display:none!important}
+#pageHost{display:block}
+.page-slot{display:none}
+#pageHost>.page-view,.page-view{max-width:1180px;width:100%;margin:0 auto}
+.page-view .memory-list,.page-view .event-list{max-height:none}
+.page-view .memory-form{max-width:720px}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:6px}
+.page-head h2{margin:2px 0 0;font-size:20px}
+.page-head .page-note{margin:6px 0 0;color:#6c7480;font-size:12.5px;line-height:1.6;max-width:760px}
+.page-back{border:0;background:none;color:#6c7480;font-size:12px;cursor:pointer;padding:4px 0}
+.page-back:hover{color:#1d6fd8}
+
+/* 她的手机：只显示最近一张画面，竖屏比例不撑高面板 */
+.phone-frame{display:flex;justify-content:center;align-items:center;background:#0d1016;border-radius:10px;overflow:hidden;min-height:160px}
+.phone-frame img{max-width:100%;max-height:380px;object-fit:contain;display:block}
+
+/* 「需要你决定」里的提问卡片 */
+.approval .question-input{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:8px 10px;border:1px solid #d7dbe1;border-radius:8px;margin:10px 0 8px}
+
+/* 定时任务页 */
+.sch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:4px 0 10px}
+.sch-grid label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#5d6572}
+.sch-grid input{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #d7dbe1;border-radius:8px;background:#fff;min-width:0}
+.sch-grid .wide{grid-column:1/-1}
+.sch-check{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#4d5562;margin:4px 0 10px}
+.sch-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 16px}
+.sch-actions button{font:inherit;font-size:13px;padding:7px 14px;border:1px solid #d7dbe1;border-radius:8px;background:#fff;cursor:pointer}
+.sch-actions button.primary{background:#1d6fd8;border-color:#1d6fd8;color:#fff}
+.sch-actions button:disabled{opacity:.55;cursor:default}
+.sch-segments{display:flex;flex-direction:column;gap:8px;margin:6px 0 12px}
+.sch-segment{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#5d6572}
+.sch-segment input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid #d7dbe1;border-radius:7px;width:88px}
+.sch-segment .drop{border:0;background:none;color:#b0382f;cursor:pointer;font-size:12px}
+.sch-note{font-size:12px;color:#8a919c;line-height:1.65}
+.sch-runs{display:flex;flex-direction:column;gap:8px}
+.sch-run{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:4px 10px;padding:9px 11px;border:1px solid #e6e9ee;border-radius:9px;background:#fbfcfd;font-size:12.5px}
+.sch-run .time{color:#8a919c;white-space:nowrap}
+.sch-run .state{font-weight:600}
+.sch-run .state.ok{color:#1f7a4d}
+.sch-run .state.bad{color:#b0382f}
+.sch-run .why{grid-column:1/-1;color:#6c7480;word-break:break-all}
+.sch-empty{padding:14px;border:1px dashed #dfe3e9;border-radius:10px;color:#8a919c;font-size:12.5px;text-align:center}

@@ -1,0 +1,42 @@
+# Single-host space deployment (console + runtime + observer + worker).
+#
+# 1. Copy ../../space/config.example.json to ../../space/config.json and edit.
+# 2. Create data/ and workdir/ next to this file and chown to uid 1000.
+# 3. Copy ../.env.example to ../.env and fill in secrets.
+# 4. docker compose -f docker-compose.example.yml up -d --build
+#
+# The console is published on 127.0.0.1:19991 only; put the authenticated
+# nginx gateway in front of it (see ../webui).
+
+services:
+  dsh-space:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dsh-space:local
+    container_name: dsh-space
+    restart: unless-stopped
+    working_dir: /workspace
+    entrypoint: ["/bin/sh"]
+    command: ["/opt/dsh-space/docker-entrypoint.sh"]
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:19991:19991"
+    volumes:
+      - ../../space:/opt/dsh-space
+      - ./data:/opt/dsh-space/data
+      - ./workdir:/opt/dsh-space/workdir
+    environment:
+      TZ: Asia/Shanghai
+      DSH_CONSOLE_BIND: "0.0.0.0"
+      DSH_OWNER_BRIDGE: "0"
+      DSH_AUTO_RESUME: "1"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      DSH_MODEL_BASE_URL: "${DSH_MODEL_BASE_URL:-http://127.0.0.1:3425/v1}"
+      DSH_PROXY_SECRET: "${DSH_PROXY_SECRET}"
+      DSH_DESKTOP_BASE: "http://${DESKTOP_HOST}:19990"
+      DSH_ANDROID_BASE: "http://${DESKTOP_HOST}:19992"
+      DSH_ANDROID_TOKEN_FILE: "data/android.token"
+    mem_limit: 2g
+    security_opt:
+      - no-new-privileges:true

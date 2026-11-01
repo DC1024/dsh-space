@@ -1,0 +1,79 @@
+{
+  "_comment": "Copy this file to config.json and edit for your installation. Paths are relative to the space code root (mounted at /opt/dsh-space in the container).",
+  "version": "0.2.0",
+  "host": "127.0.0.1",
+  "port": 19991,
+  "persona_pointer": "CURRENT_persona.json",
+  "timezone": "Asia/Shanghai",
+  "model": "deepseek-flash",
+  "daily_budget_cny": 20,
+  "stop_at_cny": 19.5,
+  "min_free_gb": 2,
+  "max_space_gb": 10,
+  "history_quota_gb": 1,
+  "idle_seconds": 600,
+  "min_available_ram_gb": 1.5,
+  "max_cpu_percent": 50,
+  "cpu_window_seconds": 120,
+  "runtime": {
+    "ready": false,
+    "session_id": null,
+    "persona_version": "",
+    "persona_sha256": "",
+    "execution_boundary": "guest-only",
+    "budget_source_ready": false,
+    "chat_ready": false,
+    "persona_bindings": {
+      "biao": {
+        "session_id": null,
+        "agent_preset": "xiaojingyu-space-biao-v04"
+      },
+      "li": {
+        "session_id": null,
+        "agent_preset": "xiaojingyu-space-li-v04"
+      }
+    },
+    "agent_preset": "xiaojingyu-space-biao-v04",
+    "legacy_session_ids": [],
+    "continuity_sessions": []
+  },
+  "desktop": {
+    "ready": false,
+    "vm_name": "dsh-her-pc",
+    "frame_file": "data/desktop.jpg",
+    "auto_poll": false,
+    "on_demand": true,
+    "mode": "http",
+    "base_url": "http://127.0.0.1:19990"
+  },
+  "phone": {
+    "ready": false
+  },
+  "owner_hold": {
+    "paused": true,
+    "reason": "New install: configure the persona, model key and devices, then allow continuation in the console."
+  },
+  "autonomy_enabled": false,
+  "dispatch_enabled": true,
+  "persona_snapshot": "personas/persona-xiaojingyu.json",
+  "assistant_name": "小鲸鱼",
+  "memory": {
+    "backend": "space-mcp",
+    "path": "data/space.sqlite",
+    "automatic_retrieval_chars": 420,
+    "automatic_retrieval_items": 3,
+    "qq_dependency": false
+  },
+  "storage_policy": {
+    "unit": "GiB",
+    "count_fixed_phone": false,
+    "vm_system_disk_logical_gib": 0,
+    "phone_accounting_space_root": "/opt/dsh-space"
+  },
+  "context": {
+    "input_byte_limit": 640000,
+    "max_steps": 0,
+    "soft_ratio": 0.7
+  },
+  "permission_preset": "workspace-write"
+}

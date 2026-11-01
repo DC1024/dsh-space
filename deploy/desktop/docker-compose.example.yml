@@ -1,0 +1,30 @@
+# Isolated X11 desktop ("her desktop").
+#
+# 1. Create ./home and give it to the container user (root by default).
+# 2. Set HER_AGENT_TOKEN to a long random value; the space reads the same
+#    value from its data/her-agent.token file.
+# 3. Set SPACE_HOST to the space host's IP; only that address may call 19990.
+# 4. docker compose -f docker-compose.example.yml up -d --build
+
+services:
+  dsh-her-pc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dsh-her-pc:local
+    container_name: dsh-her-pc
+    restart: unless-stopped
+    ports:
+      - "${DESKTOP_HOST}:19990:19990"
+      - "${DESKTOP_HOST}:6080:6080"
+    environment:
+      DISPLAY: ":99"
+      TZ: Asia/Shanghai
+      HER_AGENT_TOKEN: "${HER_AGENT_TOKEN}"
+      HER_ALLOWED_IP: "${SPACE_HOST}"
+    volumes:
+      - ./home:/home/her
+    mem_limit: 3g
+    cpus: 3
+    security_opt:
+      - no-new-privileges:true

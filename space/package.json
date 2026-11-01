@@ -1,0 +1,9 @@
+{
+  "name": "xiaojingyu-space",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "唐怀瑟",
+  "description": "小鲸鱼专属空间：只听本机 owner 指令的本地 DSH 虚拟空间（人格行为约束是功能，不是许可条件）"
+}

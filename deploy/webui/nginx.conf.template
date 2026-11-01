@@ -1,0 +1,69 @@
+# nginx template: rendered by render-nginx.sh 
+worker_processes 1;
+events { worker_connections 1024; }
+
+http {
+    access_log off;
+    auth_basic "DSH Space v2";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # Console: rewrite Host/Origin to the loopback identity the console expects.
+    server {
+        listen 18081;
+
+        # SSE endpoints rely on the owner cookie only, so browsers never pop a
+        # second Basic Auth dialog for EventSource connections.
+        location = /api/events {
+            auth_basic off;
+            proxy_pass http://127.0.0.1:19991;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:19991;
+            proxy_set_header Origin http://127.0.0.1:19991;
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+        }
+        location = /api/thinking {
+            auth_basic off;
+            proxy_pass http://127.0.0.1:19991;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:19991;
+            proxy_set_header Origin http://127.0.0.1:19991;
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+        }
+        location = /api/thinking/stream {
+            auth_basic off;
+            proxy_pass http://127.0.0.1:19991;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:19991;
+            proxy_set_header Origin http://127.0.0.1:19991;
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+        }
+
+        location / {
+            proxy_pass http://127.0.0.1:19991;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:19991;
+            proxy_set_header Origin http://127.0.0.1:19991;
+            proxy_set_header X-DSH-Proxy-Authorized "__DSH_PROXY_SECRET__";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_buffering off;
+            proxy_read_timeout 3600s;
+        }
+    }
+
+    # noVNC: proxied to her container's websockify (view + control).
+    server {
+        listen 18082;
+        location / {
+            proxy_pass http://__HER_DESKTOP_HOST__:6080;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_read_timeout 3600s;
+        }
+    }
+}

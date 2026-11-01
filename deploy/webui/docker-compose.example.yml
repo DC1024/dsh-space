@@ -1,0 +1,11 @@
+services:
+  dsh-webui:
+    image: nginx:1.27-alpine
+    container_name: dsh-webui
+    restart: unless-stopped
+    # Host network is required: nginx proxies to 127.0.0.1:19991 (the space
+    # container publishes that port on loopback) and to the desktop host's noVNC.
+    network_mode: host
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./htpasswd:/etc/nginx/.htpasswd:ro

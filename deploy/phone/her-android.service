@@ -1,0 +1,18 @@
+[Unit]
+Description=Her Android phone action API (fixed actions only)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=HER_ANDROID_BIND=0.0.0.0
+Environment=HER_ANDROID_PORT=19992
+Environment=HER_ANDROID_ALLOW_IP=10.0.0.2
+Environment=HER_ANDROID_TOKEN_FILE=/etc/her-android/token
+ExecStartPre=/opt/her-android/firewall.sh
+ExecStart=/usr/bin/python3 /opt/her-android/android_agent.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

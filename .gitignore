@@ -1,0 +1,23 @@
+# Runtime data and secrets must never be committed.
+.env
+*.env
+!.env.example
+data/
+workdir/
+exports/
+home/
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+config.json
+config.json.bak*
+schedule.json
+*.key
+*.token
+*.sqlite
+*.sqlite-*
+*.log
+htpasswd
+nginx.conf
+.DS_Store
