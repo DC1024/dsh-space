@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 SETTINGS_FILE = 'data/owner-settings.json'
+MODEL_FILE = 'data/model-settings.json'
 PENDING_FILE = 'data/persona-pending-restart.json'
 PERMISSION_PENDING_FILE = 'data/permission-pending.json'
 ARCHIVE_DIR = 'data/persona-archive'
@@ -31,11 +32,11 @@ NODE = node_executable()
 # 权限栏位：id / 分组 / 名称 / 说明 / 规则出处 / 形态 / 是否可改 / 是否已接线
 RESTRICTIONS = [
     {'id': 'device_phone', 'group': '设备', 'kind': 'switch', 'editable': True, 'wired': False,
-     'label': '使用她的 Android 真机（ADB）',
-     'desc': '观察屏幕、读界面、点击、输入、按键与滑动，只在她自己的真机里。这个开关只记录偏好，当前没有执行路径读它；实际能否操作由手机侧独占状态与权限档决定。',
+     'label': '使用她的 Android 模拟器（emulator-5562）',
+     'desc': '观察屏幕、读界面、点击、输入、按键与滑动，只在她自己的模拟器里。这个开关只记录偏好，当前没有执行路径读它；实际能否操作由手机侧独占状态与权限档决定。',
      'source': '权限约束.md', 'default': True},
     {'id': 'device_desktop', 'group': '设备', 'kind': 'switch', 'editable': True, 'wired': False,
-     'label': '使用专属桌面容器（dsh-her-pc）',
+     'label': '使用专属 Windows 虚拟机（DSH-Home-v01）',
      'desc': '观察、点击、输入、按键与滚动；故障时报错，不改用主人的宿主桌面。这个开关只记录偏好，当前没有执行路径读它。',
      'source': '权限约束.md', 'default': True},
     {'id': 'device_exclusive', 'group': '设备', 'kind': 'fact', 'editable': False, 'wired': True,
@@ -252,6 +253,121 @@ def _defaults():
             'api': {'notes': ''}}
 
 
+def model_values(store):
+    """Read model-service settings; the key file is 0600 and never sent to the UI.
+
+    config.json carries the non-secret copy so prepare_runtime and the worker
+    can read provider/model/base URL without touching the credential file.
+    """
+    saved = _read_json(store.root / MODEL_FILE, {}) or {}
+    config = store.config or {}
+    llm = config.get('llm') if isinstance(config.get('llm'), dict) else {}
+    provider = saved.get('provider') or llm.get('provider') or 'deepseek-official'
+    model = saved.get('model') or llm.get('model') or config.get('model') or 'deepseek-flash'
+    effort = saved.get('reasoning_effort') or llm.get('reasoning_effort') or 'low'
+    base_url = saved.get('base_url') or llm.get('base_url') or ''
+    api_key = saved.get('api_key') if isinstance(saved.get('api_key'), str) else ''
+    return {'provider': str(provider), 'model': str(model),
+            'reasoning_effort': str(effort), 'base_url': str(base_url),
+            'api_key': api_key, 'updated_at': saved.get('updated_at')}
+
+
+def _patch_applied(store):
+    """Whether the running runtime booted from the patch currently on disk."""
+    patch = store.root / 'data' / 'runtime-home' / 'profiles' / 'space' / 'cordis.patch.yml'
+    applied = _read_json(store.root / 'data' / 'runtime-applied.json', {}) or {}
+    try:
+        current = hashlib.sha256(patch.read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return bool(current) and applied.get('patch_sha256') == current
+
+
+def model_public(store):
+    value = model_values(store)
+    key = value['api_key'] or os.environ.get('DEEPSEEK_API_KEY', '')
+    hint = ('••••' + key[-4:]) if key else ''
+    return {'provider': value['provider'], 'model': value['model'],
+            'reasoning_effort': value['reasoning_effort'],
+            'base_url': value['base_url'], 'api_key_set': bool(key),
+            'api_key_hint': hint,
+            'api_key_source': 'data/model-settings.json' if value['api_key'] else '部署 env',
+            'updated_at': value['updated_at'],
+            'restart_required': not _patch_applied(store)}
+
+
+def save_model(store, values):
+    """Validate and persist model-service settings without echoing the key."""
+    current = model_values(store)
+    provider = str(values.get('provider', current['provider'])).strip()
+    model = str(values.get('model', current['model'])).strip()
+    effort = str(values.get('reasoning_effort', current['reasoning_effort'])).strip()
+    base_url = str(values.get('base_url', current['base_url'])).strip()
+    if not re.fullmatch(r'[A-Za-z0-9._-]{2,80}', provider):
+        raise ValueError('服务提供方名称无效')
+    if not re.fullmatch(r'[A-Za-z0-9._:/-]{1,160}', model):
+        raise ValueError('模型名称无效')
+    if effort not in ('low', 'high', 'max'):
+        raise ValueError('推理档位无效')
+    if base_url:
+        if len(base_url) > 500 or not re.fullmatch(r'https?://[^\s/]+(?:/[^\s]*)?', base_url):
+            raise ValueError('API 地址必须是 http(s) URL，且不能包含空格')
+        if '@' in base_url.split('://', 1)[1].split('/', 1)[0]:
+            raise ValueError('API 地址不能内嵌用户名或密码')
+    raw_key = values.get('api_key')
+    if raw_key is None or not str(raw_key).strip():
+        api_key = current['api_key']  # 留空 = 不修改
+    else:
+        api_key = str(raw_key).strip()
+        if len(api_key) > 4000 or any(ord(ch) < 32 for ch in api_key):
+            raise ValueError('API Key 无效或过长')
+
+    record = {'version': 1, 'provider': provider, 'model': model,
+              'reasoning_effort': effort, 'base_url': base_url,
+              'api_key': api_key, 'updated_at': _now()}
+    path = store.root / MODEL_FILE
+    old_model = path.read_bytes() if path.exists() else None
+    old_config = (store.root / 'config.json').read_bytes()
+    _write_json(path, record)
+    os.chmod(path, 0o600)
+    config = dict(store.config)
+    llm = dict(config.get('llm') or {})
+    llm.update({'provider': provider, 'model': model,
+                'reasoning_effort': effort, 'base_url': base_url})
+    config['llm'] = llm
+    config['model'] = model
+    _write_json(store.root / 'config.json', config)
+    store.config = config
+    try:
+        publish = getattr(getattr(store, 'identity', None), 'publish_binding', None)
+        if callable(publish):
+            publish()
+        patch_sha = _regenerate_patch(store)
+    except Exception as exc:
+        (store.root / 'config.json').write_bytes(old_config)
+        store.config = json.loads(old_config.decode('utf-8-sig'))
+        if old_model is None:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        else:
+            path.write_bytes(old_model)
+        try:
+            store.identity.publish_binding()
+        except Exception:
+            pass
+        raise RuntimeError('大模型设置未生效，已回滚：' + str(exc)[:300]) from None
+    store.event('model.settings.saved', {
+        'provider': provider, 'model': model, 'reasoning_effort': effort,
+        'base_url': base_url, 'api_key_set': bool(api_key),
+        'patch_sha256': patch_sha,
+        'message': '大模型服务设置已保存；重启专属运行时后生效'})
+    return {'ok': True, 'changed': True, 'restart_required': True,
+            'message': '已保存大模型服务设置；重启专属运行时后生效。',
+            'model': model_public(store)}
+
+
 def load(store):
     value = _read_json(store.root / SETTINGS_FILE)
     base = _defaults()
@@ -367,7 +483,9 @@ def _live(store):
                         'persona_version': runtime.get('persona_version')},
             'budget': {'day': budget.get('day'), 'local_recorded_cny': budget.get('local_recorded_cny'),
                        'daily_budget_cny': budget.get('daily_budget_cny'),
-                       'stop_at_cny': budget.get('stop_at_cny'), 'blockers': status.get('blockers') or []},
+                       'stop_at_cny': budget.get('stop_at_cny'),
+                       'limit_enabled': budget.get('limit_enabled', True),
+                       'blockers': status.get('blockers') or []},
             'storage': {'used_bytes': storage.get('used_bytes'), 'quota_gib': storage.get('quota_gib'),
                         'free_bytes': storage.get('free_bytes'),
                         'minimum_free_gib': storage.get('minimum_free_gib')},
@@ -404,8 +522,11 @@ def _restrictions(store, saved, live):
             row['value_text'] = str(live['model'])
         elif item.get('value_from') == 'budget':
             budget = live['budget']
-            row['value_text'] = '日额度 %s 元 · 停止线 %s 元 · 今日已记 %s 元' % (
-                budget.get('daily_budget_cny'), budget.get('stop_at_cny'), budget.get('local_recorded_cny'))
+            if budget.get('limit_enabled', True):
+                row['value_text'] = '日额度 %s 元 · 停止线 %s 元 · 今日已记 %s 元' % (
+                    budget.get('daily_budget_cny'), budget.get('stop_at_cny'), budget.get('local_recorded_cny'))
+            else:
+                row['value_text'] = '无上限 · 今日已记 %s 元' % budget.get('local_recorded_cny')
         elif item.get('value_from') == 'storage':
             storage = live['storage']
             gib = (lambda value: '—' if value is None else round(value / 2 ** 30, 1))
@@ -465,13 +586,16 @@ def settings_payload(store, csrf=''):
                        'control_console': config.get('port'),
                        'runtime': 19992, 'observer': 19993,
                        'timezone': config.get('timezone')},
-            'model': {'current': live['model'], 'allowed': ['deepseek-flash'],
-                      'provider': 'deepseek-official'},
+            'model': {'current': model_public(store)['model'],
+                      'allowed': [model_public(store)['model']],
+                      'provider': model_public(store)['provider'],
+                      'base_url': model_public(store)['base_url']},
             'mcp': {'biao': '/mcp/biao', 'li': '/mcp/li',
                     'legacy': '旧 /mcp 只返回 400 提示，不提供服务'},
             'budget': live['budget'],
             'runtime': live['runtime'],
         },
+        'model': model_public(store),
         'persona': persona,
         'pending_restart': pending,
         'defaults': _defaults(),
@@ -488,10 +612,12 @@ def _validate_switch(ident):
 def save(store, body):
     section = body.get('section')
     values = body.get('values')
-    if section not in ('permissions', 'api'):
-        raise ValueError('只接受 permissions 或 api 两段')
+    if section not in ('permissions', 'api', 'model'):
+        raise ValueError('只接受 permissions、api 或 model 三段')
     if not isinstance(values, dict):
         raise ValueError('缺少要保存的值')
+    if section == 'model':
+        return save_model(store, values)
     saved = load(store)
     applied, stored = [], []
     if section == 'permissions':

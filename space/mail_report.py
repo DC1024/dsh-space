@@ -30,7 +30,7 @@ QUIET_KINDS = SKIP_KINDS | {
 KIND_LABEL = {
     'console.start': '控制台启动', 'owner.message': '主人留言', 'memory.saved': '记忆已保存',
     'task.result': '本轮结果', 'task.failure': '本轮停止原因', 'task.accepted': '消息已接收',
-    'task.dispatch': '已派发给她', 'task.reconciled': '任务已核对', 'device.stage': '设备回执',
+    'task.dispatch': '已派发给她', 'task.reconciled': '任务已核对', 'task.reclassified': '停止原因已补注', 'device.stage': '设备回执',
     'persona.switched': '人格已切换', 'control.pause': '活动已暂停', 'control.resume': '已记录继续',
     'control.hold': '本轮已停止', 'control.correct': '纠正已保存', 'runtime.error': '运行时出错',
     'budget.settled': '费用已记账', 'budget.bound_violation': '费用待核对', 'budget.cancelled': '费用预留已撤销',
@@ -43,7 +43,7 @@ KIND_LABEL = {
 }
 TASK_STATUS = {
     'completed': '完成', 'stopped': '停止', 'failed': '失败', 'running': '进行中',
-    'queued': '排队', 'claimed': '已领取', 'uncertain': '待核对', 'needs-review': '待审阅',
+    'queued': '排队', 'claimed': '已领取', 'uncertain': '待核对', 'needs-review': '待审阅', 'reviewed': '已复核',
 }
 
 
@@ -73,14 +73,16 @@ def _clean(text, limit=0):
     value = re.sub(r'(?m)^\s*#+\s*', '', value)
     value = value.replace('**', '').replace('`', '')
     value = re.sub(r'\s+', ' ', value).strip()
-    return value[:limit] if limit else value
+    if limit and len(value) > limit:
+        return value[:limit].rstrip() + '…'
+    return value
 
 
 def _task_title(text):
     value = _clean(text)
     if value.startswith(AUTONOMY_PREFIX):
         return '自主探索'
-    return value[:56]
+    return _clean(value, 240)
 
 
 def _payload(event):
@@ -95,10 +97,10 @@ def _brief(payload):
         return ''
     failure = payload.get('failure') or {}
     if isinstance(failure, dict) and failure.get('message'):
-        return str(failure['message']).strip().replace('\n', ' ')[:200]
+        return str(failure['message']).strip().replace('\n', ' ')[:400]
     for key in ('text', 'message', 'decision', 'reason', 'filename', 'summary', 'note'):
         if payload.get(key):
-            return str(payload[key]).strip().replace('\n', ' ')[:200]
+            return str(payload[key]).strip().replace('\n', ' ')[:400]
     return ''
 
 
@@ -138,8 +140,8 @@ def collect(store, start, end):
         label = KIND_LABEL.get(event['kind'], event['kind'])
         brief = _brief(payload)
         if event['kind'] == 'memory.saved' and not brief and payload.get('items'):
-            brief = str(payload['items'][0].get('text', ''))[:200]
-        brief = _clean(brief, 200)
+            brief = str(payload['items'][0].get('text', ''))[:400]
+        brief = _clean(brief, 400)
         if event['kind'] == 'owner.message' and brief.startswith(AUTONOMY_PREFIX):
             continue
         if not brief and event['kind'] in NEED_BRIEF:
@@ -165,7 +167,7 @@ def _past_lines(facts):
         failure = payload.get('failure') or {}
         text = payload.get('text') or (failure.get('message') if isinstance(failure, dict) else '')
         if text:
-            results[event['task_id']] = _clean(text, 150)
+            results[event['task_id']] = _clean(text, 2000)
     lines = []
     recent = facts['tasks'][-4:]
     recent_ids = {item['id'] for item in recent}
@@ -203,7 +205,7 @@ def _now_lines(store, tz):
     if running:
         for item in running:
             label = TASK_STATUS.get(item['status'], item['status'])
-            lines.append(f"· {label}：{_clean(item['text'], 56)}（{_clock(item['time'], tz)} 开始）")
+            lines.append(f"· {label}：{_clean(item['text'], 240)}（{_clock(item['time'], tz)} 开始）")
     elif last is not None:
         lines.append(f"· 手上没有正在执行的任务；最近一次动作是 {_clock(last['time'], tz)} 的"
                      + KIND_LABEL.get(last['kind'], last['kind']))
@@ -232,7 +234,7 @@ def _next_lines(store, at):
             (since,)).fetchone()[0]
     if unfinished:
         lines.append('· 待你决定（不会自动重发）：' + '、'.join(
-            f"{TASK_STATUS.get(item['status'], item['status'])}「{_clean(item['text'], 36)}」"
+            f"{TASK_STATUS.get(item['status'], item['status'])}「{_clean(item['text'], 120)}」"
             for item in unfinished[:3]))
     else:
         lines.append('· 没有等你决定的任务')
@@ -304,10 +306,10 @@ def compose(store, segment, start, end, *, manual=False):
     if facts['memories']:
         lines += ['', '新增记忆：']
         for item in facts['memories'][-4:]:
-            lines.append('· ' + _clean(item['text'], 110))
+            lines.append('· ' + _clean(item['text'], 400))
     lines += ['', '这封邮件只汇总本空间记录，不包含设备截图，也不会触发新任务。']
 
-    memory_html = _block('新增记忆', [_clean(item['text'], 110)
+    memory_html = _block('新增记忆', [_clean(item['text'], 400)
                                       for item in facts['memories'][-4:]]) if facts['memories'] else ''
     html = f"""<!doctype html><html><body style="margin:0;padding:20px;background:#f5f6f8;font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;color:#20242b">
 <div style="max-width:660px;margin:0 auto;background:#fff;border-radius:12px;padding:22px 24px">
@@ -515,6 +517,19 @@ class Reports:
         return self.fire({'start': (end - dt.timedelta(hours=12)).strftime('%H:%M'),
                           'end': end.strftime('%H:%M')}, end - dt.timedelta(hours=12), end,
                          manual=True, mark=False)
+
+    def run_segment(self, segment):
+        """手动重发一个已结束时段的汇总（不记为自动触发）。"""
+        start, end = _hhmm(segment['start']), _hhmm(segment['end'])
+        if start is None or end is None:
+            raise ValueError('时段格式应为 HH:MM')
+        at = dt.datetime.now(ZoneInfo(self.store.config['timezone']))
+        window_start, window_end = _window(segment, at)
+        if window_end > at:
+            raise ValueError('该时段还没结束，不能提前汇总')
+        return self.fire({'start': f'{start[0]:02d}:{start[1]:02d}',
+                          'end': f'{end[0]:02d}:{end[1]:02d}'},
+                         window_start, window_end, manual=True, mark=False)
 
     def tick(self):
         tz = ZoneInfo(self.store.config['timezone'])

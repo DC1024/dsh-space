@@ -86,7 +86,7 @@ body.sp-open{overflow:hidden}
 .sp-field label{font-size:12px;color:#4e555f}
 .sp-field .sp-help{font-size:10px;color:var(--muted)}
 .sp-field .sp-off{font-size:10px;color:#8a7a4e}
-.sp-field input[type=text],.sp-field input[type=number],.sp-field select,.sp-field textarea{width:100%;border:1px solid #d7dfe5;border-radius:9px;background:#fafbfd;padding:8px 11px;font-size:12px;color:var(--ink)}
+.sp-field input[type=text],.sp-field input[type=number],.sp-field input[type=password],.sp-field select,.sp-field textarea{width:100%;border:1px solid #d7dfe5;border-radius:9px;background:#fafbfd;padding:8px 11px;font-size:12px;color:var(--ink)}
 .sp-field input:focus,.sp-field select:focus,.sp-field textarea:focus{border-color:#a4b3bf;outline:2px solid #cad6e0;outline-offset:0}
 .sp-field input:disabled,.sp-field select:disabled{background:#eff2f6;color:#7c8289}
 

@@ -19,8 +19,10 @@ def main():
         created = rpc('session/create', {'request': {'sessionId': requested,
             'cwd': str(ROOT/'workdir'/persona), 'agentPreset': binding['agent_preset']}})
         sid = created['sessionId']
-        rpc('session/selectModel', {'request': {'sessionId': sid, 'provider':'deepseek-official',
-                                             'model':'deepseek-flash','reasoningEffort':'low'}})
+        from owner_settings import model_values
+        llm = model_values(store)
+        rpc('session/selectModel', {'request': {'sessionId': sid, 'provider':llm['provider'],
+                                             'model':llm['model'],'reasoningEffort':llm['reasoning_effort']}})
         binding['session_id'] = sid
         # Checkpoint each created SID so an interrupted provisioning never creates duplicates.
         config['runtime']['session_id'] = bindings['biao'].get('session_id')

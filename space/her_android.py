@@ -10,8 +10,8 @@ import urllib.request
 
 from space_tools import spec
 
-BASE = os.environ.get('DSH_ANDROID_BASE', 'http://127.0.0.1:19992')
-TOKEN_FILE = os.environ.get('DSH_ANDROID_TOKEN_FILE', 'data/android.token')
+BASE = 'http://192.168.43.204:19992'
+TOKEN_FILE = 'data/android.token'
 TIMEOUT = 45
 TEXT = {'type': 'string'}
 COORD = {'type': 'integer', 'minimum': 0, 'maximum': 5000}
@@ -78,6 +78,13 @@ def _request(store, endpoint, payload=None, *, mutating=False, raw=False):
     if value.get('ok') is not True:
         raise AndroidError(str(value.get('error') or '她的手机未能完成'),
                            bool(value.get('uncertain')) or bool(value.get('executed')) and mutating)
+    return value
+
+
+def health(store):
+    """Read-only phone status from the her-android service."""
+    value = _request(store, '/health')
+    value.setdefault('ready', value.get('ok') is True)
     return value
 
 

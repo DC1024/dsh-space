@@ -4,6 +4,10 @@ Desktop: screen/click/type/key/scroll.
 Files:   /fs/list, /fs/read, /fs/write confined to /home/her.
 Exec:    /exec with an argv array (no shell), whitelisted environment.
 
+The shipped container starts this agent as root (GUI session stays uid 1000),
+so /exec can install packages or change system settings inside the isolated
+container. Files written as root are chowned back to uid 1000.
+
 No shell strings, no absolute paths, no host paths.
 """
 import base64
@@ -39,6 +43,15 @@ MAX_OUTPUT = 64 * 1024
 def _run(cmd, timeout=10):
     return subprocess.run(cmd, env=ENV, capture_output=True, timeout=timeout,
                           creationflags=0)
+
+
+def _chown_her(path):
+    if os.geteuid() != 0:
+        return
+    try:
+        os.chown(path, 1000, 1000)
+    except OSError:
+        pass
 
 
 def geometry():
@@ -182,15 +195,19 @@ def fs_write(body):
         with open(path, 'r', encoding='utf-8-sig') as handle:
             previous = handle.read()
         os.makedirs(HISTORY, exist_ok=True)
-        with open(os.path.join(HISTORY, uuid.uuid4().hex + '-' + os.path.basename(path)),
-                  'w', encoding='utf-8') as handle:
+        _chown_her(HISTORY)
+        history = os.path.join(HISTORY, uuid.uuid4().hex + '-' + os.path.basename(path))
+        with open(history, 'w', encoding='utf-8') as handle:
             handle.write(previous)
+        _chown_her(history)
     parent = os.path.dirname(path)
     os.makedirs(parent, exist_ok=True)
+    _chown_her(parent)
     temp = path + '.tmp-' + uuid.uuid4().hex
     with open(temp, 'w', encoding='utf-8') as handle:
         handle.write(text)
     os.replace(temp, path)
+    _chown_her(path)
     return {'ok': True, 'path': os.path.relpath(path, ROOT), 'chars': len(text),
             'previous_saved': previous is not None}
 
@@ -221,6 +238,7 @@ def exec_run(body):
     out = proc.stdout[:MAX_OUTPUT].decode('utf-8', 'replace')
     err = proc.stderr[:MAX_OUTPUT].decode('utf-8', 'replace')
     return {'ok': True, 'argv': argv, 'exit': proc.returncode, 'stdout': out, 'stderr': err,
+            'uid': os.geteuid(),
             'truncated': len(proc.stdout) > MAX_OUTPUT or len(proc.stderr) > MAX_OUTPUT}
 
 
@@ -228,6 +246,7 @@ def health():
     width, height = geometry()
     return {'ok': True, 'agent': 'dsh-her-pc', 'version': VERSION,
             'display': {'width': width, 'height': height},
+            'uid': os.geteuid(),
             'uptimeSeconds': round(time.time() - STARTED, 1)}
 
 

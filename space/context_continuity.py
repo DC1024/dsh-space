@@ -87,8 +87,25 @@ def prepare_session(store, task, rpc_call=None):
                        'cwd': str(store.root/'workdir'/task['persona']), 'agentPreset': cfg['agent_preset']}})
         if made.get('sessionId') != new_sid:
             raise Rejected('原生会话创建回执不匹配，未改绑定')
-        rpc_call('session/selectModel', {'request': {'sessionId': new_sid,
-                 'provider': 'deepseek-official', 'model': 'deepseek-flash', 'reasoningEffort': 'low'}})
+        from owner_settings import model_values
+        llm = model_values(store)
+        selection = {'request': {'sessionId': new_sid, 'provider': llm['provider'],
+                                 'model': llm['model'],
+                                 'reasoningEffort': llm['reasoning_effort']}}
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                rpc_call('session/selectModel', selection)
+                break
+            except RuntimeError as error:
+                text = str(error)
+                # A freshly created session can take a moment to publish its
+                # provider catalog; retry instead of leaving it on the old model.
+                if (('session/model-unavailable' in text or 'service-unavailable' in text)
+                        and time.monotonic() < deadline):
+                    time.sleep(0.5)
+                    continue
+                raise
         changed = copy.deepcopy(old)
         binding = changed['runtime']['persona_bindings'][task['persona']]
         binding['session_id'] = new_sid

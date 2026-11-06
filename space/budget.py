@@ -28,10 +28,11 @@ def nano(amount):
 
 
 class BudgetAuthority:
-    def __init__(self, path, timezone='America/New_York', stop_at='19.5'):
+    def __init__(self, path, timezone='America/New_York', stop_at='19.5', limit_enabled=True):
         self.path = Path(path)
         self.timezone = timezone
         self.stop_at = nano(stop_at)
+        self.limit_enabled = bool(limit_enabled)
         self.path.parent.mkdir(exist_ok=True, parents=True)
         with self.connect() as db:
             db.executescript('''PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
@@ -68,7 +69,7 @@ class BudgetAuthority:
                 return {'id': request_id, 'state': old[2], 'duplicate': True}
             cost = db.execute('SELECT COALESCE(SUM(cost),0) FROM entries WHERE day=?', (day,)).fetchone()[0]
             held = db.execute("SELECT COALESCE(SUM(upper_bound),0) FROM reservations WHERE day=? AND state='held'", (day,)).fetchone()[0]
-            if cost + held + upper > self.stop_at:
+            if self.limit_enabled and cost + held + upper > self.stop_at:
                 raise BudgetDenied('预算不足，保留记录并停止；不回退免费模型','BUDGET_EXHAUSTED')
             db.execute('INSERT INTO reservations VALUES(?,?,?,?,NULL,?)', (request_id, day, upper, 'held', consumer))
         return {'id': request_id, 'state': 'held', 'duplicate': False}
@@ -106,6 +107,29 @@ class BudgetAuthority:
                 return {'id':request_id,'duplicate':True,'state':'cancelled'}
             db.execute("UPDATE reservations SET state='cancelled' WHERE id=? AND state='held'", (request_id,))
         return {'id':request_id,'duplicate':False,'state':'cancelled'}
+
+    def reconcile(self, request_id=None):
+        """Release held reservations that produced no usage receipt.
+
+        Such requests may have been cancelled or interrupted before the
+        provider reported usage; keeping the upper bound forever would silently
+        starve later requests. The row is kept as 'reconciled' for audit instead
+        of being deleted, so the unknown-cost history stays visible.
+        """
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if request_id:
+                row = db.execute("SELECT state,upper_bound FROM reservations WHERE id=?", (request_id,)).fetchone()
+                if not row or row[0] != 'held':
+                    return {'id': request_id, 'duplicate': True,
+                            'state': row[0] if row else 'missing', 'released_cny': 0}
+                db.execute("UPDATE reservations SET state='reconciled' WHERE id=? AND state='held'", (request_id,))
+                return {'id': request_id, 'duplicate': False, 'state': 'reconciled',
+                        'released_cny': row[1] / 1e9}
+            rows = db.execute("SELECT id,day,upper_bound FROM reservations WHERE state='held'").fetchall()
+            db.execute("UPDATE reservations SET state='reconciled' WHERE state='held'")
+        return {'count': len(rows), 'released_cny': sum(row[2] for row in rows) / 1e9,
+                'days': sorted({row[1] for row in rows})}
 
     def import_legacy_snapshot(self, source_path):
         """Immutable one-time baseline per source; never rewrite/reprice old files."""

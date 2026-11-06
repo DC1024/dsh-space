@@ -1,11 +1,18 @@
 import copy
 import unittest
+from pathlib import Path
 from space import Store
 from worker import initial_observation_commit_pending
 
 
 class InitialCommitTests(unittest.TestCase):
     def setUp(self):
+        self.store = Store.__new__(Store)
+        self.store.root = Path('/nonexistent')
+        self.store.config = {'model': 'deepseek-flash',
+                             'llm': {'provider': 'deepseek-official',
+                                     'model': 'deepseek-flash',
+                                     'reasoning_effort': 'low'}}
         self.observe = {'code': 'MODEL_UNKNOWN', 'registered': True,
                         'activeBinding': True, 'transport': 'connected',
                         'expectedModel': 'deepseek-flash', 'pendingModel': 'deepseek-flash',
@@ -15,8 +22,8 @@ class InitialCommitTests(unittest.TestCase):
 
     def test_observed_first_commit_race_waits_without_authorizing_or_mutating(self):
         before = copy.deepcopy(self.observe)
-        self.assertTrue(initial_observation_commit_pending(Store, self.observe))
-        self.assertFalse(Store.initial_model_observation(self.observe))
+        self.assertTrue(initial_observation_commit_pending(self.store, self.observe))
+        self.assertFalse(self.store.initial_model_observation(self.observe))
         self.assertFalse(Store.observation_fresh(self.observe))
         self.assertEqual(before, self.observe)
 
@@ -33,7 +40,7 @@ class InitialCommitTests(unittest.TestCase):
                            ('expectedModel', 'other')]:
             with self.subTest(key=key):
                 changed = dict(self.observe, **{key: value})
-                self.assertFalse(initial_observation_commit_pending(Store, changed))
+                self.assertFalse(initial_observation_commit_pending(self.store, changed))
 
 
 if __name__ == '__main__':

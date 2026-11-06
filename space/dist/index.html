@@ -18,6 +18,8 @@
 </script>
 <script defer src="/settings.js">
 </script>
+<script defer src="/goals.js">
+</script>
 <script defer src="/nav-pages.js">
 </script>
 <script defer src="/schedule.js">
@@ -36,6 +38,8 @@
 <nav>
 <a href="#home" class="active">◈ <span>空间总览</span>
 </a>
+<a href="#goals">◎ <span>我的目标</span>
+</a>
 <a href="#memory">▤ <span>长期记忆</span>
 </a>
 <a href="#requests">◇ <span>需要你决定</span>
@@ -45,8 +49,7 @@
 </a>
 <a href="#schedule">⏱ <span>定时任务</span>
 </a>
-<!-- Replace 192.168.1.10 with your gateway host/IP before deployment. -->
-<a href="http://192.168.1.10:18082/vnc.html" target="_blank" rel="noopener" title="打开她的实时屏幕（VNC，可接管鼠标键盘）">▣ <span>远程 VNC</span>
+<a href="http://192.168.43.18:18082/vnc.html" target="_blank" rel="noopener" title="打开她的实时屏幕（VNC，可接管鼠标键盘）">▣ <span>远程 VNC</span>
 </a>
 <a href="#settings" data-settings="permission" title="设置：权限、接口、人设">⚙ <span>设置</span>
 </a>
@@ -316,6 +319,43 @@
 </aside>
 </div>
 <footer>人格、记忆、行动分开保存。这里的状态会如实显示，准备完成前不会自动做事。</footer>
+<div id="goalPageStore" hidden>
+<section class="panel" id="goals">
+<div class="panel-head">
+<div>
+<span class="eyebrow">YOUR GOALS</span>
+<h2>我的目标</h2>
+</div>
+<span class="muted">自主轮优先继续这里排在前面的目标</span>
+</div>
+<form id="goalForm" class="goal-form" autocomplete="off">
+<textarea id="goalText" maxlength="12000" rows="3" placeholder="想让她持续做的事，写清目标和期望结果…" required></textarea>
+<div class="goal-form-row">
+<label>执行人格
+<select id="goalPersona">
+<option value="biao">表人格</option>
+<option value="li">里人格</option>
+<option value="both">表 + 里共同</option>
+</select>
+</label>
+<label>执行端
+<select id="goalTarget">
+<option value="assistant">按需选用设备</option>
+<option value="dialogue">只对话与记忆</option>
+<option value="phone">她的手机</option>
+<option value="desktop">专属 Windows</option>
+</select>
+</label>
+<button type="submit" class="goal-primary">添加目标</button>
+</div>
+</form>
+<div id="goalMessage" class="goal-message" role="status">
+</div>
+<div id="goalList" class="goal-list">
+</div>
+<p class="goal-note">目标会进入自主轮的 owner_pending_goals（每轮按顺序读取前 5 条）；暂停或完成的目标不再被自主继续。交办会立刻生成一条任务，回执可在卡片里查看。</p>
+</section>
+</div>
 </main>
 </div>
 <section class="reason-window" id="reasonWindow" aria-label="模型思考观察窗">

@@ -25,6 +25,20 @@ for(const file of ['dsh-base/cordis.patch.yml','dsh-web-app/cordis.patch.yml',..
  }
 }
 const config=JSON.parse(fs.readFileSync(path.join(root,'config.json'),'utf8').replace(/^\uFEFF/,''));
+const llm=(config.llm&&typeof config.llm==='object')?config.llm:{};
+const llmProvider=typeof llm.provider==='string'&&llm.provider?llm.provider:'deepseek-official';
+const llmModel=typeof llm.model==='string'&&llm.model?llm.model:(config.model||'deepseek-flash');
+const llmEffort=['low','high','max'].includes(llm.reasoning_effort)?llm.reasoning_effort:'low';
+const llmBaseURL=typeof llm.base_url==='string'&&llm.base_url?llm.base_url:(process.env.DSH_MODEL_BASE_URL||'http://127.0.0.1:3425/v1');
+// The provider catalog is advisory; include every configured model id so
+// session/selectModel and the GUI model picker accept proxy aliases such as
+// auto/deepseek-v4.1-flash without recompiling the provider.
+const llmModels=Array.isArray(llm.models)&&llm.models.length?llm.models:[
+ {id:'deepseek-flash',name:'DeepSeek-V41-Flash',contextWindow:1000000,inputModalities:['text','image'],systemPromptUpdate:'in-history'},
+ {id:'deepseek-v4-pro',name:'DeepSeek-V4-Pro',contextWindow:1000000},
+ ...(llmModel==='deepseek-flash'||llmModel==='deepseek-v4-pro'?[]:[
+  {id:llmModel,name:llmModel,contextWindow:1000000,systemPromptUpdate:'in-history'}])
+];
 // Required host services do not create model-facing tools. Their tool plugins
 // remain disabled and the model-facing guard is an explicit allowlist.
 patch.push({id:'config-editor',disabled:false},{id:'commands',disabled:false},{id:'file-upload',disabled:false},
@@ -50,8 +64,7 @@ if(fs.existsSync(path.join(installed,'node_modules/@deepseek-ai/dsh-experimental
 // load_workspace_dependencies needs a real bundled Python/Node payload directory
 // (runtime.json + distributions). The desktop app ships one; without a payload
 // the tool would report nothing useful, so the row is only added when it exists.
-const payloadCandidates=[process.env.DSH_PRIMARY_RUNTIME,process.env.DSH_BUNDLED_PRIMARY_RUNTIME,
- path.join(root,'runtime','primary-runtime')].filter(Boolean);
+const payloadCandidates=[process.env.DSH_PRIMARY_RUNTIME,process.env.DSH_BUNDLED_PRIMARY_RUNTIME].filter(Boolean);
 const payloadPath=payloadCandidates.find(p=>{try{return fs.existsSync(path.join(p,'runtime.json'))}catch{return false}});
 if(payloadPath)patch.push({insert:[{id:'workspace-dependencies',name:'@deepseek-ai/dsh-tool-workspace-dependencies',config:{source:payloadPath.replace(/\\/g,'/')}}]});
 // Owner-selectable permission preset (config.json -> "permission_preset"):
@@ -142,9 +155,9 @@ if(authorityManifest.sha256!==authoritySha256){
  console.log('AUTHORITY_RULES.md changed -> re-accepted locally (local-acceptance-v01)');
 }
 const authorityPolicy=authorityBytes.toString('utf8').replace(/^\uFEFF/,'');
-patch.push({id:'agent-default-model',config:{provider:'deepseek-official',model:'deepseek-flash',reasoningEffort:'low'}},
- // Point this at your OpenAI-compatible model gateway; override with DSH_MODEL_BASE_URL.
- {id:'llm-deepseek',config:{baseURL:process.env.DSH_MODEL_BASE_URL||'http://127.0.0.1:3425/v1'}},
+patch.push({id:'agent-default-model',config:{provider:llmProvider,model:llmModel,reasoningEffort:llmEffort}},
+ // The key belongs to the configured model proxy, not necessarily api.deepseek.com.
+ {id:'llm-deepseek',config:{baseURL:llmBaseURL,models:llmModels}},
  {insert:[{id:'space-budget',name:pathToFileURL(path.join(root,'runtime-policy.mjs')).href}]});
 // Workspace Codex history is a Windows-install side product; this Linux deployment
 // has no such archive folder, so the pair is not registered here.

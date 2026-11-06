@@ -33,6 +33,7 @@ from personas import PersonaBoundary, PERSONAS, PERFORMERS
 from owner_http_auth import OwnerHttpAuth,observer_open
 import persona_policy
 import owner_settings
+import owner_goals
 from task_authority import data_authority, web_source_note
 
 ROOT = Path(__file__).resolve().parent
@@ -101,6 +102,9 @@ class Store:
             source TEXT NOT NULL,time TEXT NOT NULL,supersedes TEXT REFERENCES memory(id));
           CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,request_key TEXT UNIQUE NOT NULL,
             text TEXT NOT NULL,status TEXT NOT NULL,time TEXT NOT NULL,revision INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS goals(id TEXT PRIMARY KEY,text TEXT NOT NULL,persona TEXT NOT NULL,
+            target TEXT NOT NULL,status TEXT NOT NULL,position INTEGER NOT NULL,created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,last_task_id TEXT);
           CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,
             details TEXT NOT NULL,status TEXT NOT NULL,time TEXT NOT NULL,decision_time TEXT);
           CREATE TABLE IF NOT EXISTS costs(id TEXT PRIMARY KEY,day TEXT NOT NULL,cny REAL NOT NULL,
@@ -126,7 +130,8 @@ class Store:
             with keyfile.open('x', encoding='ascii') as f:
                 f.write(secrets.token_urlsafe(48))
         self.bridge_key = keyfile.read_text(encoding='ascii').strip()
-        self.authority = BudgetAuthority(self.data / 'budget.sqlite', self.config['timezone'], self.config['stop_at_cny'])
+        self.authority = BudgetAuthority(self.data / 'budget.sqlite', self.config['timezone'], self.config['stop_at_cny'],
+                                        limit_enabled=self.config.get('budget_limit_enabled', True))
         self.desktop_live={'ready':False,'message':'等待专属虚拟机连接'}
         self.cpu_samples=deque()
         self.cpu_previous=None
@@ -138,6 +143,15 @@ class Store:
                     self.set('active_request', {})
             self.db.execute("UPDATE tasks SET status='uncertain' WHERE status='running'")
             self.db.execute("UPDATE tasks SET status='needs-review' WHERE status IN ('queued','claimed')")
+        # A container restart interrupts every in-flight model call, so their
+        # reservations never receive a usage receipt. Reconcile them at boot
+        # instead of letting the upper bounds stay frozen forever.
+        reconciled = self.authority.reconcile()
+        if reconciled['count']:
+            self.event('budget.reconciled', {
+                'count': reconciled['count'], 'released_cny': reconciled['released_cny'],
+                'days': reconciled['days'],
+                'message': '启动对账：没有用量回执的预留已释放，记录保留'})
         self.event('console.start', {'version': VERSION, 'message': '控制台已启动；执行保持暂停'})
         from space_tools import StorageQuota
         self.storage_quota=StorageQuota(self)
@@ -341,6 +355,45 @@ class Store:
             self.db.commit()
             raise Rejected('存储达到限制：已暂停写入与执行，请导出或扩容；不会清除历史','STORAGE_LIMIT')
 
+    @staticmethod
+    def _window_clock(value):
+        try:
+            hour, minute = str(value).split(':')[:2]
+            return dt.time(int(hour), int(minute))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _window_inside(start, end, at):
+        # A range whose end is earlier than its start wraps over midnight.
+        return (start <= at < end) if start <= end else (at >= start or at < end)
+
+    def autonomy_window_active(self):
+        """True when the configured autonomy window includes the local time."""
+        window = self.config.get('autonomy_window') or {}
+        if window.get('enabled', True) is not True:
+            return False
+        windows = []
+        ranges = window.get('ranges')
+        if isinstance(ranges, list) and ranges:
+            for item in ranges:
+                if not isinstance(item, dict):
+                    continue
+                start, end = self._window_clock(item.get('start')), self._window_clock(item.get('end'))
+                if start is not None and end is not None:
+                    windows.append((start, end))
+        else:
+            start, end = self._window_clock(window.get('start')), self._window_clock(window.get('end'))
+            if start is not None and end is not None:
+                windows.append((start, end))
+        if not windows:
+            windows = [(dt.time(9, 0), dt.time(23, 0))]
+        try:
+            local = dt.datetime.now(ZoneInfo(self.config['timezone'])).time()
+        except Exception:
+            local = dt.datetime.now(dt.timezone.utc).time()
+        return any(self._window_inside(start, end, local) for start, end in windows)
+
     def _owner_idle_seconds(self):
         """Linux 上“空闲”的含义：距主人上一次非自主任务的时间。
 
@@ -348,41 +401,7 @@ class Store:
         另由 config.autonomy_window 限定时段，窗口外返回 0，让既有门直接拒绝
         新的自主步骤。
         """
-        window = self.config.get('autonomy_window') or {}
-        if window.get('enabled', True) is not True:
-            return 0
-        try:
-            local = dt.datetime.now(ZoneInfo(self.config['timezone'])).time()
-        except Exception:
-            local = dt.datetime.now(dt.timezone.utc).time()
-
-        def _clock(value):
-            try:
-                hour, minute = str(value).split(':')[:2]
-                return dt.time(int(hour), int(minute))
-            except (TypeError, ValueError):
-                return None
-
-        def _inside(start, end, at):
-            # A range whose end is earlier than its start wraps over midnight.
-            return (start <= at < end) if start <= end else (at >= start or at < end)
-
-        windows = []
-        ranges = window.get('ranges')
-        if isinstance(ranges, list) and ranges:
-            for item in ranges:
-                if not isinstance(item, dict):
-                    continue
-                start, end = _clock(item.get('start')), _clock(item.get('end'))
-                if start is not None and end is not None:
-                    windows.append((start, end))
-        else:
-            start, end = _clock(window.get('start')), _clock(window.get('end'))
-            if start is not None and end is not None:
-                windows.append((start, end))
-        if not windows:
-            windows = [(dt.time(9, 0), dt.time(23, 0))]
-        if not any(_inside(start, end, local) for start, end in windows):
+        if not self.autonomy_window_active():
             return 0
         with self.lock:
             row = self.db.execute(
@@ -470,7 +489,8 @@ class Store:
                 held = ledger.execute("SELECT COALESCE(SUM(upper_bound),0) FROM reservations WHERE day=? AND state='held'", (day,)).fetchone()[0] / 1e9
         return {'day': day, 'local_recorded_cny': spent, 'daily_budget_cny': self.config['daily_budget_cny'],
                 'stop_at_cny': self.config['stop_at_cny'], 'shared_ledger_verified': self.config['runtime']['budget_source_ready'],
-                'held_cny': held, 'note': '本空间保守峰值估算与预留，不代表供应商账单或其他DSH消费'}
+                'held_cny': held, 'limit_enabled': bool(self.config.get('budget_limit_enabled', True)),
+                'note': '本空间保守峰值估算与预留，不代表供应商账单或其他DSH消费'}
 
     def _active_for(self, persona):
         with self.identity.bind(persona):
@@ -482,8 +502,17 @@ class Store:
         panes = {}
         for p, label in PERSONAS.items():
             rows = [dict(r) for r in self.db.execute('SELECT * FROM tasks WHERE persona=? ORDER BY time DESC LIMIT 40', (p,))]
+            latest = rows[0] if rows else None
+            if latest and latest['status'] in ('stopped', 'uncertain', 'needs-review'):
+                result = self.db.execute(
+                    "SELECT payload FROM events WHERE task_id=? AND persona=? AND kind='task.result' ORDER BY seq DESC LIMIT 1",
+                    (latest['id'], p)).fetchone()
+                if result:
+                    payload = json.loads(result['payload'])
+                    latest['failure'] = payload.get('failure') or {}
+                    latest['stop_source'] = payload.get('stop_source')
             panes[p] = {'id': p, 'label': label, 'session_id': self.identity.runtime(p).get('session_id'),
-                        'latest_task': rows[0] if rows else None,
+                        'latest_task': latest,
                         'pending': sum(1 for r in rows if r['status'] in ('queued', 'claimed', 'running', 'uncertain')),
                         'tasks': rows}
         return panes
@@ -514,6 +543,8 @@ class Store:
                 if active.get('autonomy') and (self.get('paused') or not self.config.get('autonomy_enabled',False)):
                     raise Rejected('自主活动保持关闭')
                 if active.get('autonomy') and self.resources().get('idle_seconds',0)<self.config['idle_seconds']:
+                    if not self.autonomy_window_active():
+                        raise Rejected('已到设定的自主时段结束时间，本轮停止新步骤','AUTONOMY_WINDOW_CLOSED')
                     raise Rejected('主人已重新使用电脑，停止新的自主步骤')
                 if body.get('phase') == 'device_step' and active.get('target','desktop') not in (body.get('device','desktop'),'assistant'):
                     raise Rejected('This dialogue task has no device lease')
@@ -558,6 +589,12 @@ class Store:
                 raise Rejected('本空间预算权威未启用','BUDGET_NOT_READY')
             if consult:self.storage_quota.reserve_consult_slot(consult,body.get('id'))
             return self.authority.reserve(body['id'], body['upper_cny'], body['consumer'])
+        if action == 'budget/reconcile':
+            result=self.authority.reconcile(body.get('id'))
+            if result.get('released_cny'):
+                self.event('budget.reconciled',{'request_id':body.get('id'),'released_cny':result['released_cny'],
+                    'message':'本轮请求没有用量回执，预留已对账释放，记录保留'})
+            return result
         if action == 'budget/cancel_unstarted':
             result=self.authority.cancel_unstarted(body['id'], body.get('confirmed_not_sent'))
             self.event('budget.cancelled',{'request_id':body['id'],'confirmed_not_sent':True})
@@ -594,19 +631,19 @@ class Store:
         return (value.get('canObserve') is True and value.get('requiresPause') is False
                 and value.get('freshness', {}).get('ready') is True)
 
-    @staticmethod
-    def initial_model_observation(value):
+    def initial_model_observation(self, value):
         # A fresh session cannot report lastUsed until its first model request.
         # Only the first model step of a dispatched turn (owner task or, since
         # 2026-10-24 by owner decision, an autonomy turn) may use this bootstrap.
         # Device/memory mutations still require actual model evidence and a
         # fresh committed stream.
+        llm=owner_settings.model_values(self)
         fresh=value.get('freshness',{})
         return (value.get('code')=='MODEL_UNKNOWN' and value.get('registered') is True
                 and value.get('activeBinding') is True and value.get('transport')=='connected'
-                and value.get('expectedModel')=='deepseek-flash'
-                and value.get('pendingModel')=='deepseek-flash'
-                and value.get('pendingProvider')=='deepseek-official'
+                and value.get('expectedModel')==llm['model']
+                and value.get('pendingModel')==llm['model']
+                and value.get('pendingProvider')==llm['provider']
                 and fresh.get('pendingFrames')==0 and fresh.get('backlogAgeMs')==0)
 
     def mcp(self, request):
@@ -663,10 +700,14 @@ class Store:
                 result['tools'].extend(REVIEW_TOOLS)
             from context_archive_tools import TOOLS as ARCHIVE_TOOLS
             result['tools'].extend(ARCHIVE_TOOLS)
-            try:
-                from phone_tools import TOOLS as PHONE_TOOLS
-                result['tools'].extend(PHONE_TOOLS)
-            except ImportError: pass
+            if os.name == 'nt':
+                # phone_* 是 Windows 模拟器的旧适配器；Linux 空间实际走
+                # her-android 的 android_*。不要在 Linux 工具列表里暴露
+                # phone_*，否则模型会反复调用并卡在 ModuleNotFoundError。
+                try:
+                    from phone_tools import TOOLS as PHONE_TOOLS
+                    result['tools'].extend(PHONE_TOOLS)
+                except ImportError: pass
             from her_tools import TOOLS as HER_TOOLS
             result['tools'].extend(HER_TOOLS)
             from her_android import TOOLS as ANDROID_TOOLS
@@ -674,6 +715,8 @@ class Store:
         elif method == 'tools/call':
             name, args = params.get('name'), params.get('arguments', {})
             try:
+                if name.startswith('phone_') and os.name != 'nt':
+                    raise Rejected('Linux 空间没有 phone_* 工具；请使用 android_*（android_view/android_info/android_ui/android_tap/android_swipe/android_type/android_key/android_app）','PHONE_TOOL_UNAVAILABLE')
                 from space_tools import validate_arguments
                 known=self.mcp({'method':'tools/list','id':'validate'})['result']['tools']
                 definition=next((item for item in known if item['name']==name),None)
@@ -754,7 +797,8 @@ class Store:
                         try:
                             budget=self.budget()
                             if (self.get('budget_hold') or not budget['shared_ledger_verified']
-                                    or budget['local_recorded_cny']+budget['held_cny']>=budget['stop_at_cny']):
+                                    or (budget['limit_enabled']
+                                        and budget['local_recorded_cny']+budget['held_cny']>=budget['stop_at_cny'])):
                                 raise Rejected('预算检查未通过，专属电脑尚未按需启动','BUDGET_BLOCKED')
                             task_id=self.get('active_request')['task_id']
                             if not self.desktop_live.get('ready') or getattr(self,'_desktop_prepared_task_id',None)!=task_id:
@@ -876,6 +920,11 @@ class Store:
                      'vm_disk_live_verified','vm_expansion_executed')}
         for name,keys in fields.items():
             item=value.get(name) or {}
+            if name=='budget' and item.get('limit_enabled') is False:
+                # 预算无上限时不再把日额度和停止线交给模型；否则她每轮都会
+                # 按“已越过 19.5”自我限制，只做核对却继续消耗额度。
+                item={**item,'note':'预算无上限：只记录实际用量和预留，不据此停止、少做或只做状态核对。'}
+                keys=('day','local_recorded_cny','held_cny','shared_ledger_verified','limit_enabled','note')
             safe[name]={key:item[key] for key in keys if key in item}
         return safe
 
@@ -888,14 +937,14 @@ class Store:
             items.append('费用超出预留上界，等待人工核对')
         # Device readiness is checked by the requested device tool under its lease.
         if not c['runtime']['ready']:
-            items.append('Flash 运行时尚未接入')
+            items.append('模型运行时尚未接入')
         if not c['runtime']['budget_source_ready']:
             items.append('共享预算账本尚未核实')
-        if c['model'] != 'deepseek-flash':
-            items.append('模型必须为 Flash')
+        if not owner_settings.model_values(self)['model']:
+            items.append('模型尚未配置')
         if not self.persona()['available']:
             items.append('人格来源不可用')
-        if self.budget()['local_recorded_cny'] >= c['stop_at_cny']:
+        if self.budget()['limit_enabled'] and self.budget()['local_recorded_cny'] >= c['stop_at_cny']:
             items.append('当日费用达到停止线')
         return items
 
@@ -920,7 +969,7 @@ class Store:
                     'parallel_enabled':self.get('parallel_enabled'),
                     'parallel_tasks':{p:self._active_for(p) for p in PERSONAS},
                     'persona_panes':self.persona_panes(),
-                    'model': self.config['model'], 'desktop': self.config['desktop']|self.desktop_live, 'phone': self.config['phone']|self.phone_live,
+                    'model': owner_settings.model_values(self)['model'], 'desktop': self.config['desktop']|self.desktop_live, 'phone': self.config['phone']|self.phone_live,
                     'persona': self.persona(), 'storage': self.storage(), 'budget': self.budget(),
                     'resources': self.resources(), 'blockers': self.blockers(), 'tasks': tasks, 'approvals': pending,
                     'thinking':None,
@@ -966,6 +1015,21 @@ class Store:
         with self.lock, self.db:
             if action not in ('persona','parallel-prepare','parallel') and body.get('persona', self.identity.actor()) != self.identity.actor():
                 raise Rejected('人格已切换，请确认后重新发送')
+            if action == 'review_task':
+                tid = str(body.get('id') or '')
+                row = self.db.execute('SELECT persona,status FROM tasks WHERE id=?', (tid,)).fetchone()
+                if not row or row['persona'] != self.identity.actor():
+                    raise Rejected('任务不存在或不属于当前人格','TASK_NOT_FOUND')
+                if row['status'] not in ('needs-review', 'uncertain'):
+                    raise Rejected('只有待复核或待核对的任务可以关闭')
+                dispatch = self.db.execute(
+                    "SELECT session_id FROM events WHERE task_id=? AND kind='task.dispatch' ORDER BY seq DESC LIMIT 1",
+                    (tid,)).fetchone()
+                self.db.execute("UPDATE tasks SET status='reviewed' WHERE id=?", (tid,))
+                self.event('task.reviewed', {'id': tid, 'from': row['status'],
+                    'message': '主人已复核并关闭此任务；不重发'}, tid,
+                    dispatch['session_id'] if dispatch else None)
+                return {'ok': True, 'id': tid, 'status': 'reviewed'}
             if action == 'parallel-prepare':
                 enabled=body.get('enabled')
                 if type(enabled) is not bool:
@@ -1006,6 +1070,7 @@ class Store:
                 return {'ok':True,'persona':target,'paused':self.get('paused'),'resumed':not self.get('paused')}
             elif action == 'pause':
                 self.db.execute("UPDATE tasks SET status='needs-review' WHERE status='queued'")
+                self.set('auto_recover_at', None)
                 self.set('paused', True)
                 self.set('cancel_epoch',self.get('cancel_epoch')+1)
                 self.event('control.pause', {'message': '主人暂停；不再领取新动作，执行器须确认停止'})
@@ -1014,6 +1079,7 @@ class Store:
                 if not text or len(text) > 12000:
                     raise Rejected('请填写纠正内容（最多12000字）')
                 self.check_storage()
+                self.set('auto_recover_at', None)
                 self.set('paused', True)
                 self.set('cancel_epoch',self.get('cancel_epoch')+1)
                 self.db.execute("UPDATE tasks SET status='needs-review' WHERE status='queued'")
@@ -1044,6 +1110,7 @@ class Store:
                     if not (self.observation_fresh(observe) or self.initial_model_observation(observe)):
                         raise Rejected('思考观察链路未就绪，保持暂停')
                 self.check_storage()
+                self.set('auto_recover_at', None)
                 self.set('paused', False)
                 self.event('control.resume', {'revision': self.get('revision')})
             elif action == 'chat':
@@ -1111,6 +1178,16 @@ class Store:
                 import worker
                 worker.wake()
                 return {'ok': True, 'paused': self.get('paused'), 'task_id': tid}
+            elif action == 'dismiss':
+                aid = str(body.get('id', ''))
+                row = self.db.execute('SELECT kind,status FROM approvals WHERE id=?', (aid,)).fetchone()
+                if not row or row['status'] not in ('pending', 'answered', 'denied', 'expired'):
+                    raise Rejected('这条决定不存在或已经关闭')
+                if row['kind'] == 'storage_expand':
+                    raise Rejected('扩容申请只能在扩容界面处理')
+                self.db.execute('UPDATE approvals SET status=?,decision_time=? WHERE id=?',
+                                ('closed', now(), aid))
+                self.event('approval.dismissed', {'id': aid, 'message': '主人关闭了这条决定'})
             else:
                 raise Rejected('未知操作')
         if action in ('correct', 'resume'):
@@ -1171,8 +1248,8 @@ class Store:
         runtime = self.identity.runtime()
         if not runtime['session_id'] or body.get('session_id') != runtime['session_id']:
             raise Rejected('只接受显式绑定的专属会话；旧试验记录不接入')
-        if body.get('model') != 'deepseek-flash':
-            raise Rejected('非 Flash 事件已拒绝')
+        if body.get('model') != owner_settings.model_values(self)['model']:
+            raise Rejected('非当前模型事件已拒绝')
         source_key = str(body.get('source_key', ''))
         if not source_key or len(source_key) > 500:
             raise Rejected('事件须有稳定去重编号')
@@ -1394,6 +1471,8 @@ def handler(store):
                 return self.send(store.reports.payload())
             if path.path == '/api/owner/settings':
                 return self.send(owner_settings.settings_payload(store, csrf))
+            if path.path == '/api/goals':
+                return self.send(owner_goals.payload(store) | {'csrf': csrf})
             if path.path == '/api/owner/persona':
                 return self.send(owner_settings.persona_payload(store))
             if path.path == '/api/memory':
@@ -1519,6 +1598,7 @@ def handler(store):
                      '/persona-switch.css': ('persona-switch.css', 'text/css; charset=utf-8'),
                      '/nav-pages.css': ('nav-pages.css', 'text/css; charset=utf-8'),
                      '/nav-pages.js': ('nav-pages.js', 'text/javascript; charset=utf-8'),
+                     '/goals.js': ('goals.js', 'text/javascript; charset=utf-8'),
                      '/schedule.js': ('schedule.js', 'text/javascript; charset=utf-8'),
                      '/phone-panel.js': ('phone-panel.js', 'text/javascript; charset=utf-8'),
                      '/uuid-polyfill.js': ('uuid-polyfill.js', 'text/javascript; charset=utf-8')}
@@ -1571,6 +1651,8 @@ def handler(store):
                     result = store.bridge_action(self.path.removeprefix('/bridge/'), body)
                 elif self.path == '/api/owner/settings':
                     result = owner_settings.save(store, body)
+                elif self.path == '/api/goals':
+                    result = owner_goals.mutate(store, body)
                 elif self.path == '/api/owner/persona':
                     result = owner_settings.save_persona(store, body)
                 elif self.path == '/api/memory':
@@ -1590,7 +1672,11 @@ def handler(store):
                     elif action == 'test':
                         result = store.reports.send_test()
                     elif action == 'run':
-                        result = store.reports.run_now()
+                        segment = body.get('segment')
+                        if isinstance(segment, dict):
+                            result = store.reports.run_segment(segment)
+                        else:
+                            result = store.reports.run_now()
                     else:
                         raise Rejected('定时任务操作不存在')
                 elif self.path.startswith('/api/control/'):
@@ -1621,6 +1707,76 @@ def handler(store):
     return Handler
 
 
+def _auto_recovery(store):
+    """Owner choice 2026-11-05: after an unconfirmed device action, wait 10 minutes,
+    verify the device is reachable, turn the uncertain tasks into needs-review and
+    resume. Manual pause/correction clears this deadline."""
+    while True:
+        time.sleep(10)
+        try:
+            if not store.get('paused'):
+                if store.get('auto_recover_at') is not None:
+                    store.set('auto_recover_at', None)
+                continue
+            due = store.get('auto_recover_at')
+            if not isinstance(due, (int, float)) or time.time() < due:
+                continue
+            running = store.db.execute(
+                "SELECT 1 FROM tasks WHERE status IN ('claimed','running') LIMIT 1").fetchone()
+            active = running or any((store._active_for(p) or {}).get('task_id') for p in PERSONAS)
+            if active:
+                store.set('auto_recover_at', time.time() + 30)
+                continue
+            from device_lease import device_lease_status
+            if device_lease_status(store).get('phase') == 'busy':
+                store.set('auto_recover_at', time.time() + 30)
+                continue
+            blockers = store.blockers()
+            if blockers:
+                store.set('auto_recover_at', time.time() + 300)
+                store.event('control.auto-resume-blocked',
+                            {'message': '自动恢复被阻塞，5 分钟后再试', 'blockers': blockers})
+                continue
+            device = str(store.get('auto_recover_device') or 'desktop')
+            try:
+                if device == 'phone':
+                    if not store.phone_live.get('ready'):
+                        raise RuntimeError('手机未连接')
+                elif not store.desktop_live.get('ready'):
+                    raise RuntimeError('电脑未连接')
+            except Exception as error:
+                store.set('auto_recover_at', time.time() + 300)
+                store.event('control.auto-resume-blocked',
+                            {'device': device, 'message': '设备健康检查失败，保持暂停，5 分钟后再试',
+                             'error': str(error)[:200]})
+                continue
+            with store.lock, store.db:
+                for row in store.db.execute("SELECT id FROM tasks WHERE status='uncertain'").fetchall():
+                    tid = row[0]
+                    dispatch = store.db.execute(
+                        "SELECT session_id FROM events WHERE task_id=? AND kind='task.dispatch' "
+                        "ORDER BY seq DESC LIMIT 1", (tid,)).fetchone()
+                    store.db.execute("UPDATE tasks SET status='needs-review' WHERE id=?", (tid,))
+                    store.event('task.auto-reviewed',
+                                {'id': tid, 'message': '设备结果不确定，10 分钟未处理；已自动转为待复核，不重发'},
+                                tid, dispatch[0] if dispatch else None)
+                store.set('paused', False)
+                store.set('active_request', None)
+                store.set('auto_recover_at', None)
+                store.event('control.auto-resumed',
+                            {'device': device, 'message': '设备已恢复可达；不确定任务转为待复核，空间自动恢复'})
+            try:
+                import worker
+                worker.wake()
+            except Exception:
+                pass
+        except Exception as error:
+            try:
+                store.event('control.auto-resume-error', {'message': str(error)[:300]})
+            except Exception:
+                pass
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', default=str(ROOT))
@@ -1636,6 +1792,7 @@ def main():
     qq_owner.start(store)
     import worker
     worker.start(store)
+    threading.Thread(target=_auto_recovery, args=(store,), name='auto-recovery', daemon=True).start()
     import desktop
     # 主人 2026-10-24 提速：只有空间服务进程复用常驻桥接；config.speed 可关闭。
     desktop.PERSISTENT['enabled']=(store.config.get('speed') or {}).get('desktop_persistent_bridge',True) is True

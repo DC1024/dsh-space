@@ -7,6 +7,17 @@ import {createActionRepeatGuard} from './runtime-action-repeat.mjs';
 import {releaseConsumedHistory} from './runtime-memory.mjs';
 import {excludedRuntimeTool, filterRuntimeTools, ownerDecisions} from './runtime-tool-policy.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
+function modelService(){
+ let provider='deepseek-official',model='deepseek-flash';
+ try{
+  const config=JSON.parse(fs.readFileSync(path.join(root,'config.json'),'utf8').replace(/^\uFEFF/,''));
+  const llm=config.llm&&typeof config.llm==='object'?config.llm:{};
+  if(typeof llm.provider==='string'&&llm.provider)provider=llm.provider;
+  if(typeof llm.model==='string'&&llm.model)model=llm.model;
+  else if(typeof config.model==='string'&&config.model)model=config.model;
+ }catch{}
+ return {provider,model};
+}
 
 export const name='space-exclusive-tools-and-budget';
 export const inject=['tools','llm','sessionQuery'];
@@ -119,7 +130,8 @@ export function apply(ctx){
   for(const session of pctx.sessions.list())ensure(session);
  });
  ctx.on('llm/stream',(options,next)=>(async function*(){
-  if(options.model!=='deepseek-flash'||options.provider!=='deepseek-official')throw Error('FLASH_ONLY');
+  const expected=modelService();
+  if(options.model!==expected.model||options.provider!==expected.provider)throw Error('MODEL_NOT_CONFIGURED');
   // 内部请求：@deepseek-ai/dsh-experimental-auto-review 的审查器直接调 ctx.llm.stream，
   // 不带 sessionId（它是授权判定，不是主人任务的回合，也不该记进会话思考档或受会话
   // 上下文闸限制）。早先这里无条件要求 sessionId，导致审查器每次都抛
@@ -154,6 +166,10 @@ export function apply(ctx){
       fs.appendFileSync(path.join(root,'data','internal-settle-failed.jsonl'),
         JSON.stringify({time:new Date().toISOString(),error:String(e?.message||e)})+'\n');
      }
+    }else if(reserved){
+     // No usage receipt: release the hold so interrupted streams cannot starve
+     // later requests. The reservation row is kept as reconciled for audit.
+     try{await rpc('budget/reconcile',{id:internalId,reason:'no-usage'});}catch(e){}
     }
    }
    return;
@@ -189,6 +205,9 @@ export function apply(ctx){
        price_basis:'2026-10-21 official peak conservative estimate',time:new Date().toISOString()};
     fs.appendFileSync(path.join(root,'data','usage-recovery.jsonl'),JSON.stringify(row)+'\n');
     await rpc('budget/settle',row);
+   }else{
+    // Interrupted/cancelled stream with no usage receipt: release the hold.
+    try{await rpc('budget/reconcile',{id,reason:'no-usage'});}catch(e){}
    }
   }
  })(),{prepend:true});

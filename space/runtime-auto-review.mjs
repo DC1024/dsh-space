@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 function auditReview(exec, state, decision) {
     const row = {time:new Date().toISOString(), session_id:exec.agent?.session?.id,
         root_call_id:exec.rootCallId, tool:exec.name, state,
@@ -8,10 +9,14 @@ function auditReview(exec, state, decision) {
     try { fs.appendFileSync(fileURLToPath(new URL('./data/auto-review-audit.jsonl',import.meta.url)), JSON.stringify(row)+'\n'); }
     catch { /* Diagnostic failure must not change the reviewer's decision. */ }
 }
-import { BlockAssembler } from "file:///C:/dsh-deps/DSH_Official/official-runtime-0.2.1-rc.2/dsh/node_modules/%40deepseek-ai/dsh-llm/lib/index.js";
-import { deepFreeze } from "file:///C:/dsh-deps/DSH_Official/official-runtime-0.2.1-rc.2/dsh/node_modules/%40deepseek-ai/dsh-util-values/lib/index.js";
-import { AUTO_PRESET } from "file:///C:/dsh-deps/DSH_Official/official-runtime-0.2.1-rc.2/dsh/node_modules/%40deepseek-ai/dsh-permission-presets/lib/index.js";
-import { RUN_CODE_NAME } from "file:///C:/dsh-deps/DSH_Official/official-runtime-0.2.1-rc.2/dsh/node_modules/%40deepseek-ai/dsh-tools/lib/index.js";
+// Resolve the modules from the installed runtime rather than a hard-coded
+// Windows path. DSH_RUNTIME_PACKAGE points at .../dsh/package.json, so this
+// works on both the Linux container and a Windows host install.
+const runtimeRequire=createRequire(process.env.DSH_RUNTIME_PACKAGE||'/usr/local/lib/node_modules/@deepseek-ai/dsh/package.json');
+const { BlockAssembler } = await import(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-llm')).href);
+const { deepFreeze } = await import(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-util-values')).href);
+const { AUTO_PRESET } = await import(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-permission-presets')).href);
+const { RUN_CODE_NAME } = await import(pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-tools')).href);
 //#region lib/types/index.js
 /**
 * LLM-backed authorization gate for the current-session-only Auto permission
@@ -57,7 +62,6 @@ const inject = [
 	"permissionPresets",
 	"sessions",
 	"tools",
-	"workingDirectory"
 ];
 /** Return JSON text for one immutable logged value. */
 function json(value) {
@@ -401,7 +405,11 @@ async function readDecision(stream) {
 }
 /** Review one frozen pending action with the fixed policy and current LLM route. */
 async function classifyRisk(ctx, agent, exec, signal) {
-	const snapshot = snapshotAutoReview(agent, exec, await ctx.workingDirectory.ensure(agent, signal));
+	// The space profile intentionally disables workspace-controller, so the
+	// workingDirectory service is not composed. The reviewer only needs the
+	// session cwd for its prompt; it never reads files through this service.
+	const snapshot = snapshotAutoReview(agent, exec,
+		agent?.session?.header?.cwd || '/workspace');
 	const options = deepFreeze({
 		sessionId: agent.session.id,
 		reasoningEffort: agent.session.requestHeader().config.reasoningEffort,

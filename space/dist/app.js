@@ -32,7 +32,7 @@ function connectThinking(){
  if(!state?.runtime.session_id)return;
  thinkingSource=new EventSource('/api/thinking/stream?after='+thinkingSeq);
  const render=event=>{try{
-  const v=JSON.parse(event.data);if(v.sessionId!==state.runtime.session_id||v.model&&v.model!=='deepseek-flash')return;
+  const v=JSON.parse(event.data);if(v.sessionId!==state.runtime.session_id)return;
   if(v.kind==='reasoning.delta'||v.kind==='reasoning.snapshot'){
    if(v.seq<=thinkingSeq)return;thinkingSeq=v.seq;
    const key=v.attemptId+':'+(v.blockIndex??0);let block=reasonBlocks.get(key);

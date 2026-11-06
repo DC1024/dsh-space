@@ -16,6 +16,7 @@ let log = () => {};
 let ticking = false;
 const pending = new Map(); // taskId -> { chatKey, send, instruction, createdAt, delivered, sending }
 const pendingByChat = new Map(); // chatKey -> taskId
+const queries = new Map(); // taskId -> { count, firstAt, lastAt }，用来挡住模型反复查同一个任务
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,8 +50,8 @@ export function setup(ctx) {
     id: 'status',
     name: '查询空间委托结果',
     description:
-      '查询之前交给小鲸鱼空间的任务，会先等一段时间再返回。delegate 返回「还在做」时用它，把任务编号原样传进来；' +
-      '没出结果可以再查一次，别只查一次就说还在排队。',
+      '查询之前交给小鲸鱼空间的任务，会先等一小段时间再返回。只在群友明确追问进度、或怀疑结果没送到时查一次；' +
+      'delegate 返回「还在做」后不要连续调用它，空间跑完会自动把结果发到群里。',
     category: 'automation',
     icon: '🐋',
     params: {
@@ -247,12 +248,30 @@ async function delegate(args, execution) {
     pendingByChat.set(chatKey, taskId);
   }
   return '已经交给空间，还在做（任务编号 ' + taskId + '）。结果出来后会直接发到群里，你先回一句在查就行；' +
-    '也可以用 status 传这个编号继续等。';
+    '不要连续调用 status 查这个任务，本轮可以先结束。';
 }
 
 async function status(args) {
   const id = String((args && args.id) || '').trim();
   if (!id) return { ok: false, error: '缺少 id：请传任务编号' };
+
+  // 同一个任务最多真正查两次。模型被卡住时往往会连续调用同一个工具，
+  // 宿主的“重复调用”保护会直接掐掉整轮，所以第三次开始只回一句明确的停止提示。
+  const now = Date.now();
+  let q = queries.get(id);
+  if (!q || now - q.firstAt > 30 * 60 * 1000) {
+    q = { count: 0, firstAt: now, lastAt: 0 };
+    queries.set(id, q);
+  }
+  q.count += 1;
+  q.lastAt = now;
+  if (q.count > 2) {
+    const item = pending.get(id);
+    const elapsed = item ? Math.round((Date.now() - item.createdAt) / 1000) : Math.round((Date.now() - q.firstAt) / 1000);
+    return '已经查过 ' + q.count + ' 次，还是没结束（已等 ' + elapsed + ' 秒）。' +
+      '不要再用 status 查同一个任务；它跑完会自动把结果发到群里。';
+  }
+
   const requested = Number((args && args.wait_seconds) ?? 15);
   const wait = Math.max(0, Math.min(STATUS_WAIT_CAP, requested));
   const deadline = Date.now() + wait * 1000;
@@ -270,6 +289,7 @@ async function status(args) {
   }
 
   if (isTerminal(value)) {
+    queries.delete(id);
     const text = resultText(value) || '已完成，但没有文字回复。';
     const item = pending.get(id);
     if (item) {
@@ -282,5 +302,8 @@ async function status(args) {
     if (value.status === 'completed') return text;
     return { ok: false, error: text };
   }
-  return '还在做（任务编号 ' + id + '，状态 ' + value.status + '），过几秒再查。';
+  const item = pending.get(id);
+  const elapsed = item ? Math.round((Date.now() - item.createdAt) / 1000) : Math.round((Date.now() - q.firstAt) / 1000);
+  return '还在做（任务编号 ' + id + '，状态 ' + value.status + '，已等 ' + elapsed +
+    ' 秒）。结果会自动发到群里，不要连续调用 status。';
 }

@@ -25,8 +25,8 @@ _SERVE={'proc':None,'lines':None}
 SERVE_HEADER='DSH_BRIDGE_SERVE '
 # Linux deployments drive an isolated X11 container over LAN instead of Hyper-V.
 REMOTE = os.name != 'nt'
-REMOTE_BASE = os.environ.get('DSH_DESKTOP_BASE', 'http://127.0.0.1:19990')
-REMOTE_TIMEOUT = float(os.environ.get('DSH_DESKTOP_TIMEOUT', '35'))
+REMOTE_BASE = os.environ.get('DSH_DESKTOP_BASE', 'http://192.168.43.204:19990')
+REMOTE_TIMEOUT = float(os.environ.get('DSH_DESKTOP_TIMEOUT', '75'))
 
 
 class _NotSent(Exception):
@@ -356,7 +356,7 @@ def _publish_frame(store,frame,health):
     store.check_storage()
     temp=store.data/'desktop-frame.tmp'
     temp.write_bytes(image);temp.replace(store.data/'desktop.jpg')
-    status.update(ready=True,health=health,scope='dsh-her-pc')
+    status.update(ready=True,health=health,scope='DSH-Home-v01')
     store.desktop_live=status
     return status
 

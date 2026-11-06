@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 BINDING_FILE = ROOT / 'data/runtime-binding.public.json'
 ARCHIVE_ROOT = ROOT / 'data/observations'
 NODE = os.environ.get('DSH_NODE') or shutil.which('node') or 'node'
-MAX_ARCHIVE_BYTES = 8 * 1024 ** 3
+MAX_ARCHIVE_BYTES = int(os.environ.get('DSH_THINKING_MAX_BYTES', str(1 * 1024 ** 3)))
 SID = re.compile(r'^session-[A-Za-z0-9][A-Za-z0-9_-]{0,179}$')
 
 
@@ -68,8 +68,8 @@ def validate_binding(value, *, legacy_sids=(), allowed_ports=(19992,)):
     if not isinstance(profile, str) or not profile.strip() or len(profile) > 120 or any(c in profile for c in '\r\n\x00'):
         raise ThinkingBindingError('BINDING_PROFILE_INVALID')
     model = value.get('model')
-    if model != 'deepseek-flash':
-        raise ThinkingBindingError('BINDING_MODEL_MISMATCH', '正式空间固定使用Flash；观察绑定与约定模型不符')
+    if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9._:/-]{1,160}', model):
+        raise ThinkingBindingError('BINDING_MODEL_INVALID', '观察绑定的模型名无效')
     base = value.get('base')
     try:
         url = urlsplit(base)

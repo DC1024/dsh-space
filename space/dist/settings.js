@@ -8,6 +8,7 @@
     {id: 'guide', icon: '\u2726', label: '新手教程', sub: '怎么开权限、接口，怎么回来'},
     {id: 'permission', icon: '\u2699', label: '权限', sub: '分档与限制栏位'},
     {id: 'api', icon: '\u21c4', label: 'API 接口', sub: '端点、鉴权与自测'},
+    {id: 'model', icon: '\u25c8', label: '大模型服务', sub: '地址、密钥与模型'},
     {id: 'persona', icon: '\u270e', label: '人设提示词', sub: '表 / 里 的系统提示'}
   ];
   var RISK_ORDER = { publish: 1, outbound_message: 1, purchase: 1, delete_irreversible: 1 };
@@ -25,7 +26,8 @@
 
   var state = {
     section: 'permission', data: null, persona: null, csrf: '',
-    permDraft: null, apiDraft: null, personaDraft: null, personaBase: null,
+    permDraft: null, apiDraft: null, modelDraft: null, modelBase: null,
+    personaDraft: null, personaBase: null,
     error: '', note: '', busy: false, confirmResolve: null
   };
 
@@ -296,6 +298,11 @@
         state.permBase = JSON.parse(JSON.stringify(state.permDraft));
         state.apiDraft = {notes: (data.api && data.api.notes) || ''};
         state.apiBase = JSON.parse(JSON.stringify(state.apiDraft));
+        var model = data.model || {};
+        state.modelDraft = {provider: model.provider || 'deepseek-official',
+          model: model.model || 'deepseek-flash', reasoning_effort: model.reasoning_effort || 'low',
+          base_url: model.base_url || '', api_key: ''};
+        state.modelBase = JSON.parse(JSON.stringify(state.modelDraft));
         if (state.persona && state.persona.ok) {
           state.personaDraft = {表: state.persona.personas['表'] || '', 里: state.persona.personas['里'] || ''};
           state.personaBase = JSON.parse(JSON.stringify(state.personaDraft));
@@ -337,6 +344,7 @@
     if (!state.data) return;
     if (panel === 'permission') view.appendChild(renderPermission());
     else if (panel === 'api') view.appendChild(renderApi());
+    else if (panel === 'model') view.appendChild(renderModel());
     else view.appendChild(renderPersona());
     refreshDirty();
   }
@@ -550,10 +558,13 @@
         runtime.chat_ready ? '可对话' : '尚未可对话')])
     ]));
     var budget = info.budget || {};
+    var budgetText = budget.limit_enabled === false
+      ? '无上限 \u00b7 今日已记 ' + budget.local_recorded_cny + ' 元'
+      : '日额度 ' + budget.daily_budget_cny + ' 元 \u00b7 停止线 '
+        + budget.stop_at_cny + ' 元 \u00b7 今日已记 ' + budget.local_recorded_cny + ' 元';
     authCard.appendChild(el('div', {class: 'sp-row'}, [
       el('div', {}, [el('div', {class: 'sp-label'}, [el('span', {text: '额度'})]),
-        el('div', {class: 'sp-desc', text: '日额度 ' + budget.daily_budget_cny + ' 元 \u00b7 停止线 '
-          + budget.stop_at_cny + ' 元 \u00b7 今日已记 ' + budget.local_recorded_cny + ' 元'})]),
+        el('div', {class: 'sp-desc', text: budgetText})]),
       el('div', {class: 'sp-ctrl'}, [el('span', {class: 'sp-value',
         text: (budget.blockers || []).length ? (budget.blockers || []).length + ' 项阻塞' : '无阻塞'})])
     ]));
@@ -638,6 +649,91 @@
       refreshDirty();
     });
     wrap.appendChild(noteCard);
+    return wrap;
+  }
+
+  function renderModel() {
+    var wrap = el('div', {});
+    var info = state.data.model || {};
+    var draft = state.modelDraft;
+    wrap.appendChild(sectionHead('大模型服务', '这里设置模型服务的地址、模型和 API Key。保存只写磁盘，'
+      + '重启专属运行时后才载入；本页不会自动重启。Key 存在 data/model-settings.json（0600），'
+      + '页面只显示是否已设置，不回显明文。'));
+
+    var status = el('div', {class: 'sp-constraint'}, [
+      el('div', {}, [
+        el('strong', {text: '当前 ' + (info.provider || '—') + ' / ' + (info.model || '—')
+          + ' / ' + (info.reasoning_effort || '—')}),
+        el('div', {text: 'API Key：' + (info.api_key_set
+          ? '已设置（' + (info.api_key_hint || '') + '，来源 ' + (info.api_key_source || '—') + '）'
+          : '未设置') + '。保存后需要重启专属运行时；模型或地址填错会让所有任务失败。'})
+      ]),
+      el('div', {class: 'sp-ctrl'}, [info.restart_required
+        ? liveChip('待重启', false, '保存后启动新运行时才载入')
+        : liveChip('已载入', true, '当前运行时已载入磁盘上的配置')])
+    ]);
+    wrap.appendChild(status);
+
+    var card = el('div', {class: 'sp-card'}, [
+      el('header', {}, [el('div', {}, [el('h3', {text: '连接与模型'}),
+        el('p', {text: '只改本空间的模型服务配置，不写 DSH 安装目录，也不碰宿主 env。'})])])
+    ]);
+    function field(label, desc, node) {
+      var box = el('div', {class: 'sp-field'}, [el('label', {text: label}), node,
+        el('div', {class: 'sp-help', text: desc})]);
+      return box;
+    }
+    var provider = el('input', {type: 'text', id: 'sp-model-provider', spellcheck: 'false'});
+    provider.value = draft.provider;
+    provider.addEventListener('input', function (event) {
+      state.modelDraft.provider = event.target.value;
+      refreshDirty();
+    });
+    card.appendChild(field('服务提供方', '例如 deepseek-official；必须与运行时的 provider 名称一致。', provider));
+
+    var model = el('input', {type: 'text', id: 'sp-model-model', spellcheck: 'false'});
+    model.value = draft.model;
+    model.addEventListener('input', function (event) {
+      state.modelDraft.model = event.target.value;
+      refreshDirty();
+    });
+    card.appendChild(field('模型', '当前空间默认 deepseek-flash；必须与模型代理支持的名称一致。', model));
+
+    var baseUrl = el('input', {type: 'text', id: 'sp-model-base', spellcheck: 'false',
+      placeholder: '留空 = 部署默认；示例 http://127.0.0.1:3425/v1'});
+    baseUrl.value = draft.base_url;
+    baseUrl.addEventListener('input', function (event) {
+      state.modelDraft.base_url = event.target.value;
+      refreshDirty();
+    });
+    card.appendChild(field('API 地址', 'OpenAI 兼容的 http(s) 地址；留空沿用部署默认。不要在这里写用户名或密码。', baseUrl));
+
+    var effort = el('select', {id: 'sp-model-effort'}, ['low', 'high', 'max'].map(function (value) {
+      return el('option', {value: value, text: value});
+    }));
+    effort.value = draft.reasoning_effort;
+    effort.addEventListener('change', function (event) {
+      state.modelDraft.reasoning_effort = event.target.value;
+      refreshDirty();
+    });
+    card.appendChild(field('推理档位', 'low 最快；high / max 会更多思考，也更慢更贵。', effort));
+
+    var key = el('input', {type: 'password', id: 'sp-model-key', spellcheck: 'false',
+      autocomplete: 'new-password',
+      placeholder: info.api_key_set
+        ? '已设置（' + (info.api_key_hint || '') + '），留空不修改'
+        : '输入 API Key（当前未设置）'});
+    key.value = '';
+    key.addEventListener('input', function (event) {
+      state.modelDraft.api_key = event.target.value;
+      refreshDirty();
+    });
+    card.appendChild(field('API Key', '只保存在容器内 data/model-settings.json（0600），不返回浏览器；'
+      + '留空表示保持现有密钥。保存后重启专属运行时生效。', key));
+    wrap.appendChild(card);
+
+    wrap.appendChild(el('div', {class: 'sp-note', text: '保存后执行 docker restart dsh-space'
+      + '（或按你原来的方式重建容器）才会载入新配置。重启会打断正在跑的任务，所以这里不代劳。'}));
     return wrap;
   }
 
@@ -772,6 +868,7 @@
     var dirty = [];
     if (state.permDraft && state.permBase && !same(state.permDraft, state.permBase)) dirty.push('permission');
     if (state.apiDraft && state.apiBase && !same(state.apiDraft, state.apiBase)) dirty.push('api');
+    if (state.modelDraft && state.modelBase && !same(state.modelDraft, state.modelBase)) dirty.push('model');
     if (state.personaDraft && state.personaBase && !same(state.personaDraft, state.personaBase)) dirty.push('persona');
     return dirty;
   }
@@ -801,6 +898,7 @@
       if (!ok) return;
       state.permDraft = JSON.parse(JSON.stringify(state.permBase));
       state.apiDraft = JSON.parse(JSON.stringify(state.apiBase));
+      if (state.modelBase) state.modelDraft = JSON.parse(JSON.stringify(state.modelBase));
       if (state.personaBase) state.personaDraft = JSON.parse(JSON.stringify(state.personaBase));
       state.note = '';
       render();
@@ -827,6 +925,12 @@
     if (dirty.indexOf('api') >= 0) {
       jobs.push(api('/api/owner/settings', 'POST', {section: 'api', csrf: state.csrf,
         values: {notes: state.apiDraft.notes}}));
+    }
+    if (dirty.indexOf('model') >= 0) {
+      jobs.push(api('/api/owner/settings', 'POST', {section: 'model', csrf: state.csrf,
+        values: {provider: state.modelDraft.provider, model: state.modelDraft.model,
+          reasoning_effort: state.modelDraft.reasoning_effort,
+          base_url: state.modelDraft.base_url, api_key: state.modelDraft.api_key || ''}}));
     }
     if (dirty.indexOf('persona') >= 0) {
       jobs.push(api('/api/owner/persona', 'POST', {personas: collectPersonaChanges(), csrf: state.csrf}));

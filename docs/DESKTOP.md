@@ -13,6 +13,13 @@
 
 Chromium 由 agent 的 `/exec` 或桌面操作按需启动；容器内没有宿主目录，工作区在 `/home/her`。
 
+## 权限
+
+- `her_pc_agent.py` 以容器 root 运行，`/exec` 因此可以 `apt-get install`、改系统设置；这些操作仍被关在隔离容器里。
+- X11 桌面会话（Xvfb、openbox、lxpanel）仍以 uid 1000 的 `her` 用户运行；Xvfb 用 `-ac` 让 root 的 xdotool/scrot 能连接。
+- 以 root 写入 `/home/her` 的文件会自动 chown 回 `1000:1000`，避免 GUI 里的应用打不开。
+- 容器保留 `no-new-privileges`；不再使用 `--cap-drop ALL`，否则 root 没有安装软件所需的能力。
+
 ## 固定动作 API
 
 | 端点 | 作用 |

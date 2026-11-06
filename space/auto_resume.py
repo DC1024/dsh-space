@@ -27,6 +27,25 @@ def request(opener, path, body=None, csrf=None):
         return json.load(response)
 
 
+def runtime_ready(status):
+    """Wait for the DSH host generation to compose sessionController.
+
+    Only the console port is checked by the entrypoint, but the task worker
+    immediately needs session/projections. Resuming before that service exists
+    makes the first autonomy/owner task fail with gateway/service-unavailable.
+    """
+    sid = (status.get('runtime') or {}).get('session_id')
+    if not sid:
+        return False
+    try:
+        from dsh_rpc import rpc
+        value = rpc('session/projections', {'request': {'sessionId': sid}}, timeout=20)
+        return isinstance(value, dict) and isinstance(value.get('asOfSeq'), int)
+    except Exception as error:
+        print('auto-resume: runtime not ready ' + str(error)[:160], flush=True)
+        return False
+
+
 def main():
     opener = owner_opener(Path('/opt/dsh-space'), BASE)
     for _ in range(5):
@@ -42,6 +61,13 @@ def main():
             return 0
         if status.get('blockers'):
             print('auto-resume: blockers present, stay paused', flush=True)
+            return 0
+        for _ in range(10):
+            if runtime_ready(status):
+                break
+            time.sleep(2)
+        else:
+            print('auto-resume: sessionController not ready, stay paused', flush=True)
             return 0
         try:
             print('auto-resume: resume ' +

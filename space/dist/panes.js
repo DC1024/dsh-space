@@ -163,7 +163,8 @@
       const data = records.get(id);
       if (!data || !data.sid || value.sessionId !== data.sid) return;
       if (value.kind !== 'reasoning.delta' && value.kind !== 'reasoning.snapshot') return;
-      if (value.model && value.model !== 'deepseek-flash') return;
+      // 模型名会随设置变化（如 auto/deepseek-v4.1-flash）；只按会话绑定校验，
+      // 不能把非 deepseek-flash 的真实思考流全部丢掉。
       const seq = Number(value.seq); if (!Number.isFinite(seq) || seq <= data.seq) return;
       data.seq = seq;
       const key = (value.attemptId || 'unknown') + ':' + (value.blockIndex ?? 0);
@@ -231,8 +232,27 @@
     uncertain: ["待核对", "warn"],
     "needs-review": ["待你核对", "warn"],
     completed: ["已完成", "ok"],
+    reviewed: ["已复核", "ok"],
     stopped: ["已停止", "warn"],
     failed: ["已停止", "warn"],
+  };
+  const STOP_REASON = {
+    AUTONOMY_WINDOW_ENDED: "自主时段结束",
+    BUDGET_BLOCKED: "预算检查未通过",
+    OWNER_MESSAGE_FIRST: "主人新消息优先",
+    HOST_ACTIVE: "主人回来使用电脑",
+    OWNER_QUESTION_TIMEOUT: "等回答超时",
+    OWNER_QUESTION_ANSWERED: "回答已接手",
+    OBSERVATION_UNAVAILABLE: "观察链路不可用",
+    STEP_LIMIT: "步数保护",
+    REPEATED_ACTION_LIMIT: "重复动作保护",
+    CONTEXT_LIMIT: "上下文已满",
+    PROVIDER_BALANCE_EMPTY: "账户余额不足",
+    CONNECTION_INTERRUPTED: "连接中断",
+    RUNTIME_STOPPED: "执行未完成",
+    DEVICE_UNCERTAIN: "设备结果不确定",
+    CANCELLED: "停止条件触发",
+    EMPTY_REPLY: "没有最终回答",
   };
 
   const state = { csrf: null, status: null, timer: null, booted: false, refreshPromise: null, refreshAgain: false };
@@ -306,6 +326,10 @@
     noticeRetry.type = "button";
     noticeRetry.title = "把同一条内容重新发给她（会占用她的额度）";
     notice.append(noticeText, noticeRetry);
+    const noticeReview = el("button", "已核对，关闭", "dual-btn");
+    noticeReview.type = "button";
+    noticeReview.title = "核对回执后关闭这条任务；关闭后不会重发";
+    notice.insertBefore(noticeReview, noticeRetry);
     notice.hidden = true;
 
     const think = el("div", "", "dual-think");
@@ -347,7 +371,8 @@
 
     const pane = {
       id: spec.id, label: spec.label, root: root, dot: dot, state: stateText, meta: meta,
-      front: frontButton, notice: notice, noticeText: noticeText, noticeRetry: noticeRetry,
+      front: frontButton, notice: notice, noticeText: noticeText, noticeReview: noticeReview,
+      noticeRetry: noticeRetry,
       latest: null, think: think, messages: messages, empty: empty,
       jump: jump, input: input, target: target, send: send, hint: hint,
       lastSeq: 0, thinkSeq: 0, thinkText: "", source: null, thinkSource: null,
@@ -365,6 +390,7 @@
       jump.hidden = true;
     });
     frontButton.addEventListener("click", function () { switchFront(pane); });
+    noticeReview.addEventListener("click", function () { reviewLatest(pane); });
     noticeRetry.addEventListener("click", function () { retryLatest(pane); });
     send.addEventListener("click", function () { sendText(pane); });
     input.addEventListener("keydown", function (event) {
@@ -465,7 +491,7 @@
     const handle = function (message) {
       try {
         const value = JSON.parse(message.data);
-        if (pane.thinkSource !== source || sid !== pane.sid || value.sessionId !== sid || (value.model && value.model !== "deepseek-flash")) return;
+        if (pane.thinkSource !== source || sid !== pane.sid || value.sessionId !== sid) return;
         const seq = Number(value.seq) || 0;
         if (seq <= pane.thinkSeq) return;
         pane.thinkSeq = seq;
@@ -542,6 +568,27 @@
     }
   }
 
+  /** 待核对/待复核的出口：先核对设备回执，再明确关闭；关闭后不会重发。 */
+  async function reviewLatest(pane) {
+    const task = pane.latest;
+    if (!task) return;
+    pane.noticeReview.disabled = true;
+    try {
+      if (task.status === "uncertain") {
+        const result = await api("/api/control/reconcile", { id: task.id, persona: pane.id });
+        toast(pane.label + "：" + (result.message || "已核对回执，状态更新为待复核。"));
+      } else {
+        await api("/api/control/review_task", { id: task.id, persona: pane.id });
+        toast(pane.label + "：已标记复核并关闭，这条不会重发。");
+      }
+    } catch (error) {
+      toast(pane.label + "：" + error.message);
+    } finally {
+      pane.noticeReview.disabled = false;
+      refresh();
+    }
+  }
+
   async function switchFront(pane) {
     try {
       await api("/api/control/persona", { persona: pane.id });
@@ -601,8 +648,11 @@
     const info = (status.persona_panes && status.persona_panes[pane.id]) || {};
     const latest = info.latest_task || null;
     const known = latest && STATUS[latest.status] ? STATUS[latest.status] : null;
+    const failure = latest && latest.failure ? latest.failure : null;
+    const shortReason = failure && STOP_REASON[failure.code] ? STOP_REASON[failure.code] : "";
     pane.dot.className = "dual-dot" + (known ? " dual-" + known[1] : "");
-    pane.state.textContent = known ? known[0] : "空闲";
+    pane.state.textContent = known ? known[0] + (shortReason ? " · " + shortReason : "") : "空闲";
+    pane.state.title = failure ? String(failure.message || shortReason || "") : "";
     const pending = Number(info.pending) || 0;
     pane.meta.textContent = (pending ? pending + " 项未完成 · " : "") + "会话 " + String(info.session_id || "待登记").slice(-6);
     const parallel = Boolean(status.parallel_enabled);
@@ -611,15 +661,25 @@
     pane.front.textContent = isFront ? "当前前台" : "切到前台";
     pane.front.disabled = isFront;
     pane.root.classList.toggle("dual-front", isFront);
-    const waiting = latest && latest.status === "needs-review";
+    const waiting = latest && (latest.status === "needs-review" || latest.status === "uncertain");
     pane.notice.hidden = !waiting;
     if (waiting) {
       pane.latest = latest;
-      const full = String(latest.text || "").replace(/\s+/g, " ").trim();
-      const preview = full.length > 40 ? full.slice(0, 40) + "…" : full;
-      pane.noticeText.textContent = preview
-        ? "「" + preview + "」这一轮没发出去，记录还留着。"
-        : "上一轮没发出去，记录还留着。";
+      const uncertain = latest.status === "uncertain";
+      const failure = latest.failure && latest.failure.message;
+      if (uncertain) {
+        pane.noticeText.textContent = "这一轮有设备动作结果待核对，先核对回执再关闭；不会自动重发。";
+      } else {
+        const full = String(latest.text || "").replace(/\s+/g, " ").trim();
+        const preview = full.length > 40 ? full.slice(0, 40) + "…" : full;
+        pane.noticeText.textContent = failure
+          ? "停止原因：" + failure
+          : preview ? "「" + preview + "」这一轮没发出去，记录还留着。"
+          : "上一轮没发出去，记录还留着。";
+      }
+      pane.noticeReview.textContent = uncertain ? "核对回执" : "已核对，关闭";
+      pane.noticeReview.hidden = false;
+      pane.noticeRetry.hidden = uncertain;
       pane.noticeRetry.disabled = !(parallel || isFront) || pane.sending;
       pane.noticeRetry.title = (parallel || isFront)
         ? "把同一条内容重新发给" + pane.label + "（会用她今天的额度）"

@@ -2,8 +2,8 @@
    定时任务」点得进去，也能用地址栏 #memory 这样的锚点直接打开。总览保持原样。 */
 (function () {
   'use strict';
-  var PAGES = ['home', 'memory', 'requests', 'activity', 'schedule'];
-  var MOVABLE = ['memory', 'requests', 'activity'];
+  var PAGES = ['home', 'goals', 'memory', 'requests', 'activity', 'schedule'];
+  var MOVABLE = ['goals', 'memory', 'requests', 'activity'];
   var slots = {};
   var host = null;
   var current = null;
@@ -84,6 +84,7 @@
     current = page;
     markActive(page);
     if (page === 'schedule' && window.DshSchedule) window.DshSchedule.activate();
+    if (page === 'goals' && window.DshGoals) window.DshGoals.activate();
     if (page === 'memory' && typeof window.loadMemories === 'function') window.loadMemories();
   }
 

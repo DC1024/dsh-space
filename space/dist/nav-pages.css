@@ -22,6 +22,11 @@ body[data-page]:not([data-page="home"]) main#home{padding-bottom:26px}
 
 /* 「需要你决定」里的提问卡片 */
 .approval .question-input{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:8px 10px;border:1px solid #d7dbe1;border-radius:8px;margin:10px 0 8px}
+.approval-heading{align-items:center}
+.approval-tools{display:flex;align-items:center;gap:8px;flex:none}
+.approval-close{border:0;background:none;color:#8a919c;font-size:19px;line-height:1;cursor:pointer;padding:0 2px}
+.approval-close:hover{color:#b0382f}
+.approval-close:disabled{opacity:.45;cursor:default}
 
 /* 定时任务页 */
 .sch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:4px 0 10px}
@@ -46,3 +51,41 @@ body[data-page]:not([data-page="home"]) main#home{padding-bottom:26px}
 .sch-run .state.bad{color:#b0382f}
 .sch-run .why{grid-column:1/-1;color:#6c7480;word-break:break-all}
 .sch-empty{padding:14px;border:1px dashed #dfe3e9;border-radius:10px;color:#8a919c;font-size:12.5px;text-align:center}
+
+/* 我的目标页 */
+.goal-form{display:flex;flex-direction:column;gap:9px;margin:4px 0 12px;max-width:960px}
+.goal-form textarea{width:100%;box-sizing:border-box;font:inherit;font-size:13px;line-height:1.65;padding:9px 11px;border:1px solid #d7dbe1;border-radius:9px;background:#fff;resize:vertical;min-height:72px}
+.goal-form-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.goal-form-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#5d6572}
+.goal-form-row select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #d7dbe1;border-radius:8px;background:#fff}
+.goal-primary{font:inherit;font-size:13px;padding:8px 16px;border:1px solid #1d6fd8;border-radius:8px;background:#1d6fd8;color:#fff;cursor:pointer}
+.goal-message{min-height:18px;font-size:12px;color:#1f7a4d;line-height:1.6;margin:2px 0 8px}
+.goal-message.bad{color:#b0382f}
+.goal-list{display:flex;flex-direction:column;gap:10px;max-width:960px}
+.goal-card{border:1px solid #e3e7ec;border-radius:11px;background:#fff;padding:12px 14px}
+.goal-card-done{opacity:.68}
+.goal-head{display:flex;align-items:flex-start;gap:8px}
+.goal-badge{flex:none;font-size:11px;padding:2px 8px;border-radius:999px;background:#eef1f5;color:#5d6572;white-space:nowrap}
+.goal-badge-active{background:#e8f5ee;color:#1f7a4d}
+.goal-badge-paused{background:#fff4e0;color:#8a5a00}
+.goal-badge-done{background:#eef1f5;color:#6c7480}
+.goal-title{flex:1;min-width:0}
+.goal-text{margin:2px 0 0;font-size:13.5px;line-height:1.7;color:#2c333d;white-space:pre-wrap;word-break:break-word}
+.goal-meta{font-size:11.5px;color:#8a919c;margin:7px 0 0}
+.goal-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:10px}
+.goal-actions button{font:inherit;font-size:12px;padding:5px 11px;border:1px solid #d7dbe1;border-radius:7px;background:#fff;cursor:pointer;color:#3c4450}
+.goal-actions button:hover{border-color:#b9c2ce}
+.goal-actions button:disabled{opacity:.4;cursor:default}
+.goal-actions .goal-primary{border-color:#1d6fd8;background:#1d6fd8;color:#fff}
+.goal-actions .goal-move{padding:5px 9px}
+.goal-edit-text{width:100%;box-sizing:border-box;font:inherit;font-size:13px;line-height:1.65;padding:9px 11px;border:1px solid #d7dbe1;border-radius:9px;margin-top:8px;resize:vertical;min-height:76px}
+.goal-edit-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.goal-edit-row select{font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid #d7dbe1;border-radius:7px;background:#fff}
+.goal-mini{font-size:11.5px;color:#6c7480}
+.goal-last{font-size:11.5px;color:#6c7480;margin-top:9px;padding-top:8px;border-top:1px dashed #e6e9ee}
+.goal-receipt{margin-top:8px;padding:9px 11px;border-radius:8px;background:#fbfcfd;border:1px solid #e6e9ee}
+.goal-failure{margin:0 0 6px;font-size:12px;color:#b0382f;line-height:1.6}
+.goal-receipt-text{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;color:#3c4450;max-height:320px;overflow:auto}
+.goal-note{font-size:12px;color:#8a919c;line-height:1.7;max-width:960px;margin:12px 0 0}
+.goal-empty{padding:18px;border:1px dashed #dfe3e9;border-radius:10px;color:#8a919c;font-size:12.5px;text-align:center}
+

@@ -15,10 +15,22 @@ def web_source_note(note):
 
 
 def owner_pending_goals(store, persona, limit=5):
-    """Read owner task records, never infer an owner goal from memory or output."""
+    """Active owner goals first; with no goals at all, fall back to pending tasks."""
     if persona not in ('biao', 'li') or type(limit) is not int or not 1 <= limit <= 20:
         raise ValueError('Invalid pending-goal query')
     with store.lock:
+        try:
+            total = store.db.execute('SELECT COUNT(*) FROM goals').fetchone()[0]
+        except Exception:
+            total = 0
+        if total:
+            rows = store.db.execute('''SELECT id,text,target,updated_at FROM goals
+                WHERE (persona=? OR persona='both') AND status='active'
+                ORDER BY position,created_at LIMIT ?''',
+                (persona, limit)).fetchall()
+            return [{'goal_id': row['id'], 'request': row['text'][:2400],
+                     'target': row['target'], 'updated_at': row['updated_at'],
+                     'status': 'active'} for row in rows]
         rows = store.db.execute('''SELECT id,time,status,text FROM tasks
             WHERE persona=? AND status IN ('needs-review','stopped')
               AND instr(request_key,'autonomy-')=0

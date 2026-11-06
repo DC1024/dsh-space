@@ -27,7 +27,10 @@ def _diagnostic(method, attempt, code):
 def rpc(method, args=None, timeout=30):
     request = {'base':'http://127.0.0.1:19992','home':str(ROOT/'data/runtime-home'),
                'method':method,'args':args or {},'timeoutMs':timeout*1000}
-    attempts = 3 if method in READ_METHODS else 1
+    # The runtime composes its host generation just after the port opens. The
+    # first read can race that composition and report sessionController as
+    # unavailable; retry reads briefly instead of failing the owner's task.
+    attempts = 8 if method in READ_METHODS else 1
     for attempt in range(1, attempts+1):
         try:
             result = subprocess.run([NODE,str(HELPER)],
@@ -36,15 +39,23 @@ def rpc(method, args=None, timeout=30):
             if result.returncode:
                 raise RuntimeError('RPC_PROCESS_EXIT_'+str(result.returncode))
             envelope=json.loads(result.stdout)
-            break
         except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError) as error:
             code = str(error) if isinstance(error, RuntimeError) else type(error).__name__
             _diagnostic(method, attempt, code)
             if attempt == attempts:
                 raise RuntimeError('独立 DSH RPC 传输失败：'+code+'；诊断已保存，任务未自动重发') from None
             time.sleep(0.25 * attempt)
-    value=envelope.get('result',{})
-    if value.get('ok') is not True:
-        err=value.get('error',{})
-        raise RuntimeError(str(err.get('code'))+': '+str(err.get('message'))[:500])
-    return value.get('value')
+            continue
+        value=envelope.get('result',{})
+        if value.get('ok') is not True:
+            err=value.get('error',{})
+            code=str(err.get('code'))
+            message=str(err.get('message'))[:500]
+            retryable=code.startswith(('gateway/service-unavailable','gateway/timeout','gateway/internal'))
+            _diagnostic(method, attempt, code)
+            if method in READ_METHODS and retryable and attempt < attempts:
+                time.sleep(1.0)
+                continue
+            raise RuntimeError(code+': '+message)
+        return value.get('value')
+    raise RuntimeError('独立 DSH RPC 传输失败：未取得有效回执；任务未自动重发')

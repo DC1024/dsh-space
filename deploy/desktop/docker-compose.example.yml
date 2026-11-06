@@ -1,6 +1,6 @@
 # Isolated X11 desktop ("her desktop").
 #
-# 1. Create ./home and give it to the container user (root by default).
+# 1. Create ./home and give it to uid 1000 (the her GUI user).
 # 2. Set HER_AGENT_TOKEN to a long random value; the space reads the same
 #    value from its data/her-agent.token file.
 # 3. Set SPACE_HOST to the space host's IP; only that address may call 19990.
@@ -14,6 +14,10 @@ services:
     image: dsh-her-pc:local
     container_name: dsh-her-pc
     restart: unless-stopped
+    # The action agent runs as root inside this isolated container so her_run
+    # can install packages or change system settings. The X11 desktop session
+    # itself is launched as the unprivileged her user by start-her-pc.sh.
+    user: "0:0"
     ports:
       - "${DESKTOP_HOST}:19990:19990"
       - "${DESKTOP_HOST}:6080:6080"

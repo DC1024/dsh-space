@@ -1,7 +1,11 @@
 """One device operation at a time; model calls take priority over previews."""
 from contextlib import contextmanager
+import os
 import threading
+import time
 import uuid
+
+AUTO_RECOVER_SECONDS = int(os.environ.get('DSH_AUTO_RECOVER_SECONDS', '600'))
 
 _EXECUTOR_LOCK = threading.Lock()
 _STATE_LOCK = threading.Lock()
@@ -52,12 +56,15 @@ def _check_current(store, captured):
         raise Rejected('已有设备操作结果不确定，手机和电脑都保持停止；须核对原回执','DEVICE_RESULT_UNCERTAIN')
 
 
-def _mark_unknown(store, captured):
+def _mark_unknown(store, captured, device=None):
     # Persist before releasing the global lock, so a waiter cannot race the
     # caller's outer error handling and start on the other device.
     try:
         with store.lock, store.db:
             row=store.db.execute('SELECT status FROM tasks WHERE id=?',(captured['task_id'],)).fetchone()
+            store.set('auto_recover_at', time.time()+AUTO_RECOVER_SECONDS)
+            store.set('auto_recover_device', device or 'desktop')
+            store.set('auto_recover_task', captured['task_id'])
             if not row or row[0] != 'uncertain':
                 store.db.execute("UPDATE tasks SET status='uncertain' WHERE id=?",(captured['task_id'],))
                 store.set('paused',True)
@@ -103,7 +110,7 @@ def lease(store, device, action=None):
             # A screen request can include an explicitly authorized VM wake.
             # Preserve an executor's explicit uncertain flag even for reads.
             unknown = (getattr(error,'result',None) or {}).get('uncertain',action not in READ_ONLY)
-            if unknown:_mark_unknown(store,captured)
+            if unknown:_mark_unknown(store,captured,device)
             store.event('device.stage',{**metadata,'phase':'failed',
                         'effect':'unconfirmed' if unknown else 'read_only_or_rejected'},task_id,captured['session_id'])
             raise

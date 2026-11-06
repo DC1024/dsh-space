@@ -9,6 +9,9 @@ if [ ! -e node_modules ]; then
     ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules node_modules 2>/dev/null || true
 fi
 export PYTHONUNBUFFERED=1
+# Thinking archive capacity. The default 1 GiB is too small for this space
+# (2.3 GiB of history); the owner already expanded the space quota to 12 GiB.
+export DSH_THINKING_MAX_BYTES="${DSH_THINKING_MAX_BYTES:-8589934592}"
 
 wait_port() {
     python3 - "$1" <<'PY'

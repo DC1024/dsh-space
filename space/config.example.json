@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy this file to config.json and edit for your installation. Paths are relative to the space code root (mounted at /opt/dsh-space in the container).",
+  "_说明": "复制为 config.json 再按本机改。persona_pointer 指向你自己写的人格指针文件；路径默认按仓库克隆到 C:\\dsh-space 写，别的位置用 deploy\\rewrite_paths.py 改。",
   "version": "0.2.0",
   "host": "127.0.0.1",
   "port": 19991,
@@ -8,11 +8,12 @@
   "model": "deepseek-flash",
   "daily_budget_cny": 20,
   "stop_at_cny": 19.5,
-  "min_free_gb": 2,
-  "max_space_gb": 10,
-  "history_quota_gb": 1,
+  "budget_limit_enabled": true,
+  "min_free_gb": 50,
+  "max_space_gb": 120,
+  "history_quota_gb": 8,
   "idle_seconds": 600,
-  "min_available_ram_gb": 1.5,
+  "min_available_ram_gb": 3,
   "max_cpu_percent": 50,
   "cpu_window_seconds": 120,
   "runtime": {
@@ -38,20 +39,18 @@
     "continuity_sessions": []
   },
   "desktop": {
-    "ready": false,
-    "vm_name": "dsh-her-pc",
+    "ready": true,
+    "vm_name": "DSH-Home-v01",
     "frame_file": "data/desktop.jpg",
     "auto_poll": false,
-    "on_demand": true,
-    "mode": "http",
-    "base_url": "http://127.0.0.1:19990"
+    "on_demand": true
   },
   "phone": {
     "ready": false
   },
   "owner_hold": {
     "paused": true,
-    "reason": "New install: configure the persona, model key and devices, then allow continuation in the console."
+    "reason": "新安装：配置好人格、模型密钥和设备后在控制台点\"允许继续\""
   },
   "autonomy_enabled": false,
   "dispatch_enabled": true,
@@ -66,14 +65,14 @@
   },
   "storage_policy": {
     "unit": "GiB",
-    "count_fixed_phone": false,
-    "vm_system_disk_logical_gib": 0,
-    "phone_accounting_space_root": "/opt/dsh-space"
+    "count_fixed_phone": true,
+    "vm_system_disk_logical_gib": 80,
+    "phone_accounting_space_root": "C:\\dsh-space\\DSH专属空间_v01"
   },
   "context": {
     "input_byte_limit": 640000,
     "max_steps": 0,
     "soft_ratio": 0.7
   },
-  "permission_preset": "workspace-write"
+  "permission_preset": "auto"
 }

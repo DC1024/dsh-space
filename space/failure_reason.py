@@ -17,10 +17,16 @@ def classify(reason, stop_source=None):
         code, message = 'BUDGET_BLOCKED', '预算检查未通过，本轮停止。已保留账本和未知费用，请核对预算回执。'
     elif stop_source == 'owner-message-preempt':
         code, message = 'OWNER_MESSAGE_FIRST', '主人发来新消息，自主探索先停下，马上处理主人的消息。'
+    elif stop_source == 'host-became-active':
+        code, message = 'HOST_ACTIVE', '主人开始使用电脑，自主探索本轮让位并停止，不自动重发；下个自主时段会继续。'
+    elif stop_source == 'device-result-uncertain':
+        code, message = 'DEVICE_UNCERTAIN', '设备动作结果不确定，本轮已安全停下，不自动重发。空间会在 10 分钟后自动核对并恢复；原操作记录保留。'
     elif stop_source == 'owner-question-timeout':
         code, message = 'OWNER_QUESTION_TIMEOUT', '问题已经放到「需要你决定」；30 秒内没有收到回答，本轮先结束。你回答后她会接着做，旧任务不会重发。'
     elif stop_source == 'owner-question-answered':
         code, message = 'OWNER_QUESTION_ANSWERED', '你已回答这个问题，本轮结束；回答已作为新任务交给她继续。'
+    elif stop_source == 'autonomy-window-ended':
+        code, message = 'AUTONOMY_WINDOW_ENDED', '已到设定的自主时段结束时间，本轮停下且不自动重发；下个时段会开新任务继续。'
     elif stop_source in ('owner-correction-or-pause', 'host-became-active') or kind == 'cancelled':
         code, message = 'CANCELLED', '本轮已按停止条件结束，未自动重发。'
     elif kind == 'completed':

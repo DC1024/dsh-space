@@ -116,16 +116,18 @@ class PersonaBoundary:
         s = self.store
         actor = self.active()
         runtime = self.runtime(actor)
+        from owner_settings import model_values
+        llm = model_values(s)
         registry = []
         for persona in PERSONAS:
             binding = self.runtime(persona)
             if binding.get('session_id'):
                 registry.append({'persona': persona, 'sessionId': binding['session_id'],
-                                 'model': 'deepseek-flash', 'provider': 'deepseek-official'})
+                                 'model': llm['model'], 'provider': llm['provider']})
         public = {'schemaVersion': 2, 'home': str(s.data/'runtime-home'), 'profile': 'space',
                   'base': 'http://127.0.0.1:19992', 'activePersona': actor,
                   'sessionId': runtime.get('session_id'),
-                  'model': 'deepseek-flash', 'provider': 'deepseek-official',
+                  'model': llm['model'], 'provider': llm['provider'],
                   'agent_preset': runtime.get('agent_preset', 'space-'+actor+'-v02'),
                   'registrations': registry}
         target = s.data/'runtime-binding.public.json'
