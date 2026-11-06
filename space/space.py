@@ -712,6 +712,8 @@ class Store:
             result['tools'].extend(HER_TOOLS)
             from her_android import TOOLS as ANDROID_TOOLS
             result['tools'].extend(ANDROID_TOOLS)
+            from github_tools import TOOLS as GITHUB_TOOLS
+            result['tools'].extend(GITHUB_TOOLS)
         elif method == 'tools/call':
             name, args = params.get('name'), params.get('arguments', {})
             try:
@@ -775,6 +777,10 @@ class Store:
                     self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'space_tool'})
                     from space_tools import call
                     value=call(self,name,args)
+                elif name.startswith('github_'):
+                    self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'space_tool'})
+                    from github_tools import invoke as github_invoke
+                    value=github_invoke(self, name, args)
                 elif name.startswith('phone_'):
                     self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'device_step','device':'phone'})
                     from phone_tools import invoke
