@@ -771,7 +771,7 @@ class Store:
                         value={'understanding':understanding,'next_step':next_step,'revision':self.get('revision'),'resumed':False}
                         self.set('correction_response',value)
                         self.event('correction.acknowledged',value)
-                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','pet','web_fetch','web_search','image_capabilities','image_create_svg','qq_push_image','image_list','qq_list_groups'):
+                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','web_fetch','web_search','image_capabilities','image_create_svg','qq_push_image','image_list','qq_list_groups'):
                     if (name.startswith('workspace_review_') or name=='workspace_read_diff') and self.identity.actor()!='li':
                         raise Rejected('审查工具只对里人格开放')
                     self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'space_tool'})
@@ -1456,13 +1456,6 @@ def handler(store):
             q = parse_qs(path.query)
             if path.path == '/permissions':
                 return self.send((store.root/'权限约束.md').read_bytes(),content_type='text/plain; charset=utf-8')
-            if path.path.startswith('/assets/pet/'):
-                from urllib.parse import unquote
-                from space_tools import PET
-                name=unquote(path.path.removeprefix('/assets/pet/'))
-                file=store.root/'assets/pet'/name
-                if name not in PET.values() or not file.is_file():return self.send({'error':'not found'},404)
-                return self.send(file.read_bytes(),content_type='video/webm')
             if path.path.startswith('/artifacts/'):
                 import re
                 name=path.path.removeprefix('/artifacts/')
