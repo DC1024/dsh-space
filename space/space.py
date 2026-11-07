@@ -771,7 +771,7 @@ class Store:
                         value={'understanding':understanding,'next_step':next_step,'revision':self.get('revision'),'resumed':False}
                         self.set('correction_response',value)
                         self.event('correction.acknowledged',value)
-                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','pet','web_fetch','web_search','image_capabilities','image_create_svg','qq_push_image'):
+                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','pet','web_fetch','web_search','image_capabilities','image_create_svg','qq_push_image','image_list','qq_list_groups'):
                     if (name.startswith('workspace_review_') or name=='workspace_read_diff') and self.identity.actor()!='li':
                         raise Rejected('审查工具只对里人格开放')
                     self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'space_tool'})

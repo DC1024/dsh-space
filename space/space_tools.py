@@ -31,7 +31,9 @@ TOOLS=[
      'vm_disk_target_gib':{'type':'integer','minimum':1,'maximum':1048576}},['target_gib','reason','request_key']),
  spec("image_capabilities","本空间图片能力：SVG转PNG可用，AI绘图未配置。"),
  spec("image_create_svg","在本空间保存SVG并渲染PNG。只允许无外链、无脚本的SVG；不是AI图像生成。",{"svg":{"type":"string","maxLength":100000}},["svg"]),
- spec("qq_push_image","把本空间渲染好的图片直接推送到 QQ。默认发给主人私聊；给 group_id 可发到群。图片用 image_create_svg 返回的 id。只在本机走内网推送桥，不需要图床或公开链接。",{"id":{"type":"string","maxLength":64},"group_id":{"type":"integer","minimum":1,"maximum":4000000000},"text":{"type":"string","maxLength":2000}},["id"]),
+ spec("qq_push_image","把本空间已渲染的图推到 QQ。默认发给主人私聊；传 group_id 发到群。id 必须来自 image_create_svg 的返回，不知道就先调 image_list；群号必须来自 qq_list_groups，不要猜。可以在 text 里附一句说明。",{"id":{"type":"string","maxLength":64},"group_id":{"type":"integer","minimum":1,"maximum":4000000000},"text":{"type":"string","maxLength":2000}},["id"]),
+ spec("image_list","列出本空间已渲染的图（最新在前）：id、字节数、渲染时间、有没有 SVG 源文件。推送前不确定 id 就调它。"),
+ spec("qq_list_groups","列出机器人已加入的 QQ 群：群号、群名、人数。要发到群必须先调它拿真实群号。"),
  spec('workspace_list','列出可读目录：默认自己的工作区；加 "peer/" 只读对方工作区，加 "dist/" 只读本空间界面目录。不能访问宿主。',{'path':TEXT}),
  spec('workspace_read','分页读取 UTF-8 文件，默认每页12000字（最多20000字）。若 truncated=true，用 next_offset 继续读取，不需要重新申请授权。路径权限不变；优先按需读取相关段落，不要反复全量读同一文件。',{'path':TEXT,'offset':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':20000}},['path']),
  spec('workspace_write','保存自己的作品、代码或笔记；覆盖工作区文件时保留前一版本。表可写自己的工作区与 dist/ 静态界面资产（html/css/js/svg/png/jpg/ico/webp/md），里只写自己的工作区。不能修改执行器、权限或用户界面以外的控制程序。',{'path':TEXT,'text':{'type':'string','maxLength':100000}},['path','text']),
@@ -389,13 +391,53 @@ def own_path(store,raw='',create=False):
     return base,candidate
 
 QQ_BRIDGE=os.environ.get('DSH_QQ_BRIDGE','http://192.168.43.18:13200')
-def _push_image(args):
+
+def _outputs_dir(store):
+    return Path(store.root)/'image-studio'/'outputs'
+
+def _list_images(store):
+    """列出已渲染的图。模型不知道 id 时先看这里。"""
+    d=_outputs_dir(store);rows=[]
+    if d.is_dir():
+        for f in d.iterdir():
+            m=re.fullmatch(r'([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.png',f.name)
+            if not m:continue
+            try:st=f.stat()
+            except OSError:continue
+            rows.append({'id':m.group(1),'bytes':st.st_size,
+                'rendered_at':datetime.datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                '_ts':st.st_mtime,'svg':(d/(m.group(1)+'.svg')).is_file()})
+    rows.sort(key=lambda r:-r['_ts'])
+    for r in rows:r.pop('_ts',None)
+    out={'count':len(rows),'images':rows[:30]}
+    if not rows:out['note']='本空间还没渲染过图，先用 image_create_svg 出图'
+    return out
+
+def _list_groups():
+    """向推送桥要群列表。模型不该猜 group_id。"""
+    import urllib.error,urllib.request
+    try:
+        with urllib.request.urlopen(QQ_BRIDGE+'/groups',timeout=20) as r:
+            res=json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError('查询群列表失败：'+e.read().decode('utf-8','replace')[:300])
+    except urllib.error.URLError as e:
+        raise RuntimeError('连不上 QQ 推送桥 %s（%s）'%(QQ_BRIDGE,e.reason))
+    if not res.get('ok'):raise RuntimeError('查询群列表失败：%s'%res.get('error','未知错误'))
+    groups=res.get('groups') or []
+    return {'count':len(groups),'groups':groups}
+
+def _push_image(store,args):
     """把 outputs 里的图推给 QQ。真正干活的是宿主机 push-bridge，
     这里只负责校验 id 并把错误翻译成人能看懂的话。"""
     import urllib.error,urllib.request
     aid=str(args.get('id','')).strip()
     if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',aid):
-        raise ValueError('图片 id 无效，应为 image_create_svg 返回的 id')
+        raise ValueError('图片 id 无效。id 是 image_create_svg 返回的 uuid，想看已有图请先调 image_list')
+    if not (_outputs_dir(store)/(aid+'.png')).is_file():
+        recent=[r['id'] for r in (_list_images(store).get('images') or [])[:5]]
+        raise ValueError('没有这个 id 的图：%s。%s'%(aid,
+            ('可用的最近 id：'+'、'.join(recent)) if recent else '本空间还没渲染过图，请先调 image_create_svg'))
     payload={'path':aid+'.png','text':str(args.get('text') or '')[:2000]}
     gid=args.get('group_id')
     if gid is not None:
@@ -412,7 +454,11 @@ def _push_image(args):
 
 def call(store,name,args):
     if name=='qq_push_image':
-        return _push_image(args)
+        return _push_image(store,args)
+    if name=='image_list':
+        return _list_images(store)
+    if name=='qq_list_groups':
+        return _list_groups()
     if name in ('image_capabilities','image_create_svg'):
         store.check_storage()
         proc=subprocess.run([_node(),str(store.root/'image-studio/local-cli.mjs')],input=json.dumps({**args,'name':name,'persona':store.identity.actor()}),capture_output=True,text=True,encoding='utf-8',timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
