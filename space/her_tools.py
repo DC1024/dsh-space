@@ -50,19 +50,26 @@ def _clip_tail(text, limit=OUTPUT_CLIP):
     return '…（前略，仅保留最后 %d 字）\n' % limit + text[-limit:], True
 
 
+def _reject(message):
+    """Pre-execution rejection: nothing was sent, so it is not an uncertain device result."""
+    error = ValueError(message)
+    error.result = {'ok': False, 'error': message, 'uncertain': False, 'retry_safe': True}
+    return error
+
+
 def _start(store, args):
     import desktop
     argv = args.get('argv')
     if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
-        raise ValueError('argv 必须是非空字符串数组')
+        raise _reject('argv 必须是非空字符串数组')
     cwd = str(args.get('cwd') or '/home/her')
     log = str(args.get('log') or 'lab/her-start.log')
     if not cwd.startswith('/home/her'):
-        raise ValueError('cwd 必须位于 /home/her 内')
+        raise _reject('cwd 必须位于 /home/her 内')
     if not log.startswith('/'):
         log = '/home/her/' + log
     if not log.startswith('/home/her/'):
-        raise ValueError('日志路径必须位于 /home/her 内')
+        raise _reject('日志路径必须位于 /home/her 内')
     payload = json.dumps({'argv': argv, 'log': log, 'cwd': cwd}, ensure_ascii=False)
     code = ("import json,subprocess; d=json.loads(%r); "
             "f=open(d['log'],'w',encoding='utf-8'); "
@@ -82,7 +89,7 @@ def invoke(store, name, args):
         return _start(store, args)
     endpoint = _ENDPOINTS.get(name)
     if not endpoint:
-        raise ValueError('未知的她电脑工具')
+        raise _reject('未知的她电脑工具')
     if name == 'her_read':
         args = dict(args)
         args.setdefault('limit', READ_LIMIT)
@@ -97,11 +104,11 @@ def invoke(store, name, args):
         args = dict(args)
         timeout = args.get('timeout_sec', 20)
         if type(timeout) is not int or not 1 <= timeout <= RUN_TIMEOUT:
-            raise ValueError('her_run 前台最多 %d 秒；长命令请改用 her_start 后台运行，再用 her_read 轮询日志。' % RUN_TIMEOUT)
+            raise _reject('her_run 前台最多 %d 秒；长命令请改用 her_start 后台运行，再用 her_read 轮询日志。' % RUN_TIMEOUT)
         args['timeout_sec'] = timeout
         argv = args.get('argv')
         if isinstance(argv, list) and argv and all(isinstance(x, str) for x in argv) and _long_command(argv):
-            raise ValueError('检测到可能超过30秒的命令；请改用 her_start 在后台启动，再用 her_read 读日志尾部，避免前台超时和上下文膨胀。')
+            raise _reject('检测到可能超过30秒的命令；请改用 her_start 在后台启动，再用 her_read 读日志尾部，避免前台超时和上下文膨胀。')
         value = desktop.remote_request(store.root, endpoint, args, mutating=True)
         out = dict(value); cut_any = False
         for key in ('stdout', 'stderr'):
