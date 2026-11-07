@@ -247,6 +247,7 @@
     STEP_LIMIT: "步数保护",
     REPEATED_ACTION_LIMIT: "重复动作保护",
     CONTEXT_LIMIT: "上下文已满",
+    CONTEXT_ROTATED: "上下文已压缩",
     PROVIDER_BALANCE_EMPTY: "账户余额不足",
     CONNECTION_INTERRUPTED: "连接中断",
     RUNTIME_STOPPED: "执行未完成",

@@ -771,7 +771,7 @@ class Store:
                         value={'understanding':understanding,'next_step':next_step,'revision':self.get('revision'),'resumed':False}
                         self.set('correction_response',value)
                         self.event('correction.acknowledged',value)
-                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','pet','web_fetch','web_search','image_capabilities','image_create_svg'):
+                elif name in ('workspace_list','workspace_read','workspace_write','workspace_review_list','workspace_read_diff','workspace_review_decide','pet','web_fetch','web_search','image_capabilities','image_create_svg','qq_push_image'):
                     if (name.startswith('workspace_review_') or name=='workspace_read_diff') and self.identity.actor()!='li':
                         raise Rejected('审查工具只对里人格开放')
                     self.bridge_action('gate',{'session_id':self.identity.runtime()['session_id'],'phase':'space_tool'})
@@ -994,7 +994,7 @@ class Store:
         value['context_policy']={'new_owner_task':'fresh_native_session',
                                  'current_task':'retain_goal_and_receipts',
                                  'history':'short_index_then_explicit_retrieval',
-                                 'mid_task_rotation':'not_implemented',
+                                 'mid_task_rotation':'autonomy_only_soft_rotate_at_78pct_or_90_requests',
                                  'default_device':'phone_first_computer_on_demand'}
         value['thinking']=self.observer_status(value['runtime'].get('session_id'))
         return value

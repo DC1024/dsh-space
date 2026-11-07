@@ -1,6 +1,8 @@
 """Owner-message queue. Does not parse or retain reasoning blocks."""
 import json
 import math
+import os
+import re
 import threading
 import time
 import traceback
@@ -8,6 +10,12 @@ from dsh_rpc import rpc
 from task_authority import trusted_task_prompt
 
 CONTROL_ONLY_TARGETS = ('correction', 'storage')
+
+# 自主轮在硬上下文上限之前主动收尾：写 checkpoint、归档旧会话、排队下一段。
+# 阈值可由 config.json -> context 覆盖，也可用环境变量临时调整。
+CONTEXT_ROTATE_RATIO = float(os.environ.get('DSH_CONTEXT_ROTATE_RATIO', '0.78'))
+CONTEXT_ROTATE_REQUESTS = int(os.environ.get('DSH_CONTEXT_ROTATE_REQUESTS', '90'))
+CONTEXT_ROTATE_MAX_CHAIN = int(os.environ.get('DSH_CONTEXT_ROTATE_MAX_CHAIN', '4'))
 
 # 跨控制台重启遗留的 uncertain 任务会把这个人格的整条队列卡死：claim_task 见到
 # uncertain 就不再取新任务，而 reconcile 以前对 run_id 不符的一律拒绝，于是那条
@@ -100,6 +108,106 @@ def prompt_with_memory(store,text):
     return text
 
 
+def _is_autonomy(task):
+    return str(task.get('request_key') or '').split(':', 1)[-1].startswith('autonomy-')
+
+
+def _latest_context_ratio(store, sid):
+    """Read the runtime's byte-only pressure log; no prompt bodies are stored."""
+    path = store.data / 'context-pressure.jsonl'
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()[-100:]
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get('session_id') != sid:
+            continue
+        ratio = row.get('ratio')
+        if isinstance(ratio, (int, float)) and math.isfinite(ratio):
+            return float(ratio)
+    return None
+
+
+def _request_count(store, tid):
+    with store.lock:
+        row = store.db.execute("SELECT COUNT(*) FROM events WHERE task_id=? AND kind='reasoning.request'",
+                               (tid,)).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _rotation_chain(task):
+    value = str(task.get('request_key') or '').split(':', 1)[-1]
+    match = re.search(r'-r(\d+)$', value)
+    return int(match.group(1)) if match else 0
+
+
+def _rotation_due(store, task, ratio, requests):
+    """Only autonomous rounds rotate automatically; owner tasks keep their budget."""
+    if not _is_autonomy(task):
+        return None
+    # 设备动作进行中不压缩：必须先拿到设备回执，否则会留下无法核对的动作。
+    if store.device_inflight.get(task['id']):
+        return None
+    cfg = store.config.get('context') or {}
+    try:
+        ratio_limit = float(cfg.get('rotate_ratio', CONTEXT_ROTATE_RATIO))
+        request_limit = int(cfg.get('rotate_max_requests', CONTEXT_ROTATE_REQUESTS))
+    except (TypeError, ValueError):
+        ratio_limit, request_limit = CONTEXT_ROTATE_RATIO, CONTEXT_ROTATE_REQUESTS
+    if ratio is not None and ratio >= ratio_limit:
+        return {'source': 'context-ratio', 'ratio': ratio, 'requests': requests}
+    if requests >= request_limit:
+        return {'source': 'request-cap', 'ratio': ratio, 'requests': requests}
+    return None
+
+
+def _records_text_calls(records):
+    texts = []
+    calls = []
+    for event in records:
+        if event.get('type') != 'assistant/message':
+            continue
+        blocks = event.get('data', {}).get('message', {}).get('content', [])
+        for block in blocks:
+            if block.get('type') == 'text' and block.get('text'):
+                texts.append(block['text'])
+            if block.get('type') == 'tool-call' and block.get('name'):
+                calls.append(block['name'])
+    return texts, calls
+
+
+def _rotation_summary(task, records, ratio, requests):
+    texts, calls = _records_text_calls(records)
+    last_text = (texts[-1] if texts else '').strip()[:900]
+    tools = '、'.join(sorted(set(str(name) for name in calls))) or '无'
+    ratio_text = ('%.0f%%' % (ratio * 100)) if isinstance(ratio, (int, float)) else '未知'
+    return ('上一轮在上下文 %s（%s 次模型请求）时主动压缩收尾。原目标：%s；'
+            '最近工具：%s；最近状态：%s。请继续同一目标，先按需读取上一轮结果和工作区进度，'
+            '不要重演已完成动作。' % (ratio_text, requests, str(task.get('text') or '')[:400], tools,
+                                  last_text or '未留下最终文字'))
+
+
+def _successor_key(task):
+    tail = str(task.get('request_key') or '').split(':', 1)[-1]
+    base = re.sub(r'-r(\d+)$', '', tail) or 'autonomy-context'
+    return (base[:90] + '-r' + str(_rotation_chain(task) + 1))
+
+
+def _create_successor(store, task, summary):
+    chain = _rotation_chain(task)
+    if chain >= CONTEXT_ROTATE_MAX_CHAIN:
+        return None
+    key = _successor_key(task)
+    text = (str(task.get('text') or '') + '\n\n【上下文压缩续接】' + summary)[:24000]
+    result = store.command('chat', {'request_key': key, 'text': text, 'target': 'assistant'})
+    return {'id': result.get('id'), 'request_key': key, 'status': result.get('status'),
+            'chain': chain + 1, 'duplicate': bool(result.get('duplicate'))}
+
+
 def claim_task(store):
     # 队列停摆的唯一原因通常是遗留的 uncertain：先尝试在锁外核对（会做只读 RPC），
     # 免得把网络等待带进全局锁里。
@@ -182,7 +290,7 @@ def run_bound(store):
                 raise RuntimeError('DSH未明确接收，保留请求待核对')
             store.event('task.accepted',{'id':tid,'message':'已发送给专属Flash，接收不代表完成'},tid,sid)
             seen_records={};started_at=time.monotonic();cancel_deadline=None; cancelled=False; stop_reason=None
-            observation_lost=None
+            observation_lost=None; rotation_info=None
             while execution_window_open(started_at,timeout_seconds,time.monotonic(),cancel_deadline):
                 active=store.get('active_request')
                 observer=store.observer_status()
@@ -232,6 +340,25 @@ def run_bound(store):
                 for e in records: seen_records[e['seq']]=e
                 records=[seen_records[k] for k in sorted(seen_records)]
                 ends=[e for e in records if e.get('type')=='turn/end']
+                # 自主轮在达到上下文压缩点或请求上限时主动收尾：
+                # 取消当前回合，等 turn/end 后用 checkpoint 续接新任务；
+                # 不把手动暂停/主人消息的停止原因混进压缩路径。
+                if ends:
+                    pass
+                elif not cancelled:
+                    ratio=_latest_context_ratio(store,sid)
+                    requests=_request_count(store,tid)
+                    due=_rotation_due(store,task,ratio,requests)
+                    if due:
+                        summary=_rotation_summary(task,records,ratio,requests)
+                        rotation_info={**due,'summary':summary}
+                        stop_reason='context-rotation'
+                        store.event('context.rotated',{'phase':'prepare','source':due['source'],
+                            'ratio':due.get('ratio'),'requests':due.get('requests'),
+                            'message':'上下文达到压缩点，准备收尾并续接下一段'},tid,sid)
+                        store.event('control.hold',{'message':'上下文达到压缩点，本轮主动收尾并续接；旧动作不重发',
+                            'source':'context-rotation'},tid,sid)
+                        rpc('session/cancel',{'request':{'sessionId':sid}}); cancelled=True; cancel_deadline=time.monotonic()+30
                 if ends:
                     end=ends[-1]; reason=end.get('data',{}).get('reason',{}).get('kind','unknown')
                     texts=[]; calls=[]
@@ -243,34 +370,84 @@ def run_bound(store):
                                 if block.get('type')=='text' and block.get('text'): final_text.append(block['text'])
                                 if block.get('type')=='tool-call': calls.append(block.get('name'))
                             if final_text and not any(b.get('type')=='tool-call' for b in blocks): texts=final_text
-                    from output_guard import inspect_output
-                    checked=inspect_output('\n\n'.join(texts),task['text'],end.get('data',{}).get('reason'))
-                    status='completed' if reason=='completed' and not cancelled and checked['text'] else 'stopped'
+                    if rotation_info:
+                        # 自主轮主动压缩：用可核对的本地摘要收尾，不采用模型最后一句；
+                        # 旧回合已 turn/end，可安全排队下一段，旧动作不重发。
+                        checked={'text':rotation_info['summary'],'flags':['context_rotated'],
+                                 'local_changes':[],'needs_repair':False}
+                        status='stopped'
+                        failure={'code':'CONTEXT_ROTATED',
+                                 'message':'本轮在上下文压缩点主动收尾，已保留摘要与工具回执并续接下一段；旧动作不重发。'}
+                    else:
+                        from output_guard import inspect_output
+                        checked=inspect_output('\n\n'.join(texts),task['text'],end.get('data',{}).get('reason'))
+                        status='completed' if reason=='completed' and not cancelled and checked['text'] else 'stopped'
+                        from failure_reason import classify
+                        failure=classify(end.get('data',{}).get('reason'),stop_reason)
+                        if not failure and not checked['text']:
+                            failure={'code':'EMPTY_REPLY','message':'本轮没有生成最终回答，工具回执已保留，旧任务不会重发。'}
                     with store.lock,store.db:
                         if store.device_inflight.get(tid) or store.db.execute('SELECT status FROM tasks WHERE id=?',(tid,)).fetchone()[0]=='uncertain':status='uncertain'
                         store.db.execute('UPDATE tasks SET status=? WHERE id=?',(status,tid)); store.set('active_request',{})
                         store.set('owner_question',{})
-                    from failure_reason import classify
-                    failure=classify(end.get('data',{}).get('reason'),stop_reason)
-                    if not failure and not checked['text']:
-                        failure={'code':'EMPTY_REPLY','message':'本轮没有生成最终回答，工具回执已保留，旧任务不会重发。'}
                     store.event('task.result',{'id':tid,'status':status,'reason':reason,'failure':failure,'stop_source':stop_reason,'text':checked['text'],'output_check':{k:v for k,v in checked.items() if k!='text'},
                         'tools':calls,'through_seq':end['seq'],'goal_verification':'not-automatically-verified'},tid,sid,source_key='task-result:'+tid)
                     store.event('context.archived',{'task_id':tid,'session_id':sid,'through_seq':end['seq'],
                         'source_ids':['task:'+tid+':request','task:'+tid+':result'],
-                        'originals_retained':True,'message':'本轮原文和回执已归档；新任务只带短索引，细节按需检索。'},
+                        'originals_retained':True,
+                        'message':('本轮按上下文压缩点归档；摘要和回执保留，下一段只带摘要，细节按需检索。' if rotation_info
+                                   else '本轮原文和回执已归档；新任务只带短索引，细节按需检索。')},
                         tid,sid,source_key='context-archived:'+tid)
                     with store.identity.bind(task['persona']):
                         store.identity.log('task.result','模型本轮'+('结束' if status=='completed' else '停止')+'，任务目标须按实际回执核对；实际工具：'+('、'.join(sorted(set(str(x) for x in calls))) or '无')+'。记忆共用并按需读取；执行者归属保留，对话原文不自动复制。',tid,sid,'task-result:'+tid)
+                    if rotation_info and status!='uncertain':
+                        successor=None; skipped=''
+                        try:
+                            successor=_create_successor(store,task,rotation_info['summary'])
+                        except Exception as error:
+                            skipped=(str(error) or error.__class__.__name__)[:200]
+                        if successor:
+                            store.event('context.rotated',{'phase':'successor','source':rotation_info['source'],
+                                'ratio':rotation_info.get('ratio'),'requests':rotation_info.get('requests'),
+                                'next_task_id':successor.get('id'),'next_request_key':successor.get('request_key'),
+                                'chain':successor['chain'],'duplicate':successor['duplicate'],
+                                'message':'已排队下一段自主任务，带压缩摘要继续；旧动作不重发'},tid,sid,
+                                source_key='context-rotated-successor:'+tid)
+                        else:
+                            store.event('context.rotated',{'phase':'successor-skipped','source':rotation_info['source'],
+                                'ratio':rotation_info.get('ratio'),'requests':rotation_info.get('requests'),
+                                'chain':_rotation_chain(task),'detail':skipped,
+                                'message':'已达到自动续接上限或当前状态不允许排队；摘要与回执保留，等待主人决定'},
+                                tid,sid,source_key='context-rotated-successor:'+tid)
                     break
                 time.sleep(1)
             else:
                 if not cancelled:
                     rpc('session/cancel',{'request':{'sessionId':sid}})
-                with store.lock,store.db:
-                    store.db.execute("UPDATE tasks SET status=CASE WHEN target IN ('desktop','phone','assistant') THEN 'uncertain' ELSE 'needs-review' END WHERE id=?",(tid,)); store.set('active_request',{})
-                    store.set('owner_question',{})
-                store.event('runtime.error',{'message':('停止回执等待超时，继续保留待核对状态；不自动重发' if cancelled else '达到本安装设置的任务时限，已请求停止；不自动重发'),'task_timeout_seconds':timeout_seconds,'stop_source':stop_reason},tid,sid)
+                if rotation_info:
+                    # 已请求在压缩点收尾，但 30 秒内没等到 turn/end。旧会话尚未结束，
+                    # 不能排队续接（上下文连续性检查会拒绝），只保留摘要与回执。
+                    with store.lock,store.db:
+                        store.db.execute("UPDATE tasks SET status='stopped' WHERE id=?",(tid,))
+                        store.set('active_request',{}); store.set('owner_question',{})
+                    store.event('task.result',{'id':tid,'status':'stopped','reason':'cancel-timeout',
+                        'failure':{'code':'CONTEXT_ROTATED','message':'已在上下文压缩点请求收尾，但停止回执超时；摘要与回执保留，未自动续接。'},
+                        'stop_source':'context-rotation','text':rotation_info['summary'],'tools':[],
+                        'through_seq':None,'goal_verification':'not-automatically-verified'},tid,sid,
+                        source_key='task-result:'+tid)
+                    store.event('context.archived',{'task_id':tid,'session_id':sid,
+                        'source_ids':['task:'+tid+':request','task:'+tid+':result'],
+                        'originals_retained':True,'message':'压缩收尾的停止回执超时；原文与摘要保留，下一段需主人确认后再续接。'},
+                        tid,sid,source_key='context-archived:'+tid)
+                    store.event('context.rotated',{'phase':'successor-skipped','source':rotation_info['source'],
+                        'ratio':rotation_info.get('ratio'),'requests':rotation_info.get('requests'),
+                        'message':'停止回执未在 30 秒内到达，未自动续接；保留摘要与回执'},tid,sid,
+                        source_key='context-rotated-successor:'+tid)
+                else:
+                    with store.lock,store.db:
+                        store.db.execute("UPDATE tasks SET status=CASE WHEN target IN ('desktop','phone','assistant') THEN 'uncertain' ELSE 'needs-review' END WHERE id=?",(tid,)); store.set('active_request',{})
+                        store.set('owner_question',{})
+                    store.event('runtime.error',{'message':('停止回执等待超时，继续保留待核对状态；不自动重发' if cancelled else '达到本安装设置的任务时限，已请求停止；不自动重发'),'task_timeout_seconds':timeout_seconds,'stop_source':stop_reason},tid,sid)
         except Exception as e:
             # 本地诊断：异常类型/堆栈只留在本机文件，不写入对话，也不重发任务。
             try:

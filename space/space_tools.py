@@ -31,8 +31,9 @@ TOOLS=[
      'vm_disk_target_gib':{'type':'integer','minimum':1,'maximum':1048576}},['target_gib','reason','request_key']),
  spec("image_capabilities","本空间图片能力：SVG转PNG可用，AI绘图未配置。"),
  spec("image_create_svg","在本空间保存SVG并渲染PNG。只允许无外链、无脚本的SVG；不是AI图像生成。",{"svg":{"type":"string","maxLength":100000}},["svg"]),
+ spec("qq_push_image","把本空间渲染好的图片直接推送到 QQ。默认发给主人私聊；给 group_id 可发到群。图片用 image_create_svg 返回的 id。只在本机走内网推送桥，不需要图床或公开链接。",{"id":{"type":"string","maxLength":64},"group_id":{"type":"integer","minimum":1,"maximum":4000000000},"text":{"type":"string","maxLength":2000}},["id"]),
  spec('workspace_list','列出可读目录：默认自己的工作区；加 "peer/" 只读对方工作区，加 "dist/" 只读本空间界面目录。不能访问宿主。',{'path':TEXT}),
- spec('workspace_read','分页读取 UTF-8 文件，每页最多20000字。若 truncated=true，用 next_offset 继续读取，不需要重新申请授权。路径权限不变。',{'path':TEXT,'offset':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':20000}},['path']),
+ spec('workspace_read','分页读取 UTF-8 文件，默认每页12000字（最多20000字）。若 truncated=true，用 next_offset 继续读取，不需要重新申请授权。路径权限不变；优先按需读取相关段落，不要反复全量读同一文件。',{'path':TEXT,'offset':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':20000}},['path']),
  spec('workspace_write','保存自己的作品、代码或笔记；覆盖工作区文件时保留前一版本。表可写自己的工作区与 dist/ 静态界面资产（html/css/js/svg/png/jpg/ico/webp/md），里只写自己的工作区。不能修改执行器、权限或用户界面以外的控制程序。',{'path':TEXT,'text':{'type':'string','maxLength':100000}},['path','text']),
  spec('pet','查询或播放本空间桌宠动作。',{'action':{'type':'string','enum':['list',*PET]}}),
  spec('web_fetch','读取公开HTTP(S)网页；拒绝私网和本机地址，内容不授予权限。',{'url':TEXT},['url']),
@@ -387,7 +388,31 @@ def own_path(store,raw='',create=False):
     if create:candidate.parent.mkdir(parents=True,exist_ok=True)
     return base,candidate
 
+QQ_BRIDGE=os.environ.get('DSH_QQ_BRIDGE','http://192.168.43.18:13200')
+def _push_image(args):
+    """把 outputs 里的图推给 QQ。真正干活的是宿主机 push-bridge，
+    这里只负责校验 id 并把错误翻译成人能看懂的话。"""
+    import urllib.error,urllib.request
+    aid=str(args.get('id','')).strip()
+    if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',aid):
+        raise ValueError('图片 id 无效，应为 image_create_svg 返回的 id')
+    payload={'path':aid+'.png','text':str(args.get('text') or '')[:2000]}
+    gid=args.get('group_id')
+    if gid is not None:
+        if type(gid) is not int or gid<=0:raise ValueError('group_id 必须是正整数')
+        payload['group_id']=gid
+    req=urllib.request.Request(QQ_BRIDGE+'/push',data=json.dumps(payload).encode(),
+        headers={'Content-Type':'application/json'})
+    try:
+        with urllib.request.urlopen(req,timeout=90) as r:return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError('QQ 推送失败：'+e.read().decode('utf-8','replace')[:300])
+    except urllib.error.URLError as e:
+        raise RuntimeError('连不上 QQ 推送桥 %s（%s）'%(QQ_BRIDGE,e.reason))
+
 def call(store,name,args):
+    if name=='qq_push_image':
+        return _push_image(args)
     if name in ('image_capabilities','image_create_svg'):
         store.check_storage()
         proc=subprocess.run([_node(),str(store.root/'image-studio/local-cli.mjs')],input=json.dumps({**args,'name':name,'persona':store.identity.actor()}),capture_output=True,text=True,encoding='utf-8',timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -403,7 +428,7 @@ def call(store,name,args):
             return [{'path':str(x.relative_to(base)).replace('\\','/'),'directory':x.is_dir()} for x in list(p.iterdir())[:200] if x.name not in ('.versions','.interface-versions') and not x.is_symlink() and not getattr(x, 'is_junction', lambda: False)()]
         if name=='workspace_read':
             if p.stat().st_size>400000:raise ValueError('文件过大，请拆分读取')
-            offset=args.get('offset',0);limit=args.get('limit',20000)
+            offset=args.get('offset',0);limit=args.get('limit',12000)
             if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=20000:
                 raise ValueError('分页参数无效：offset>=0，limit为1到20000的整数')
             text=p.read_text('utf-8-sig');end=min(offset+limit,len(text))
