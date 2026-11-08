@@ -44,6 +44,10 @@ fi
 node start_runtime.mjs >> data/service-runtime.log 2>&1 &
 RUNTIME=$!
 
+# Thinking archive retention: keep observations below the 8 GiB capacity guard.
+# The daemon takes its own flock; a duplicate start exits without touching a live run.
+python3 thinking_cleanup.py --daemon --keep-hours 6 --interval-hours 6 >> data/observations/cleanup.log 2>&1 &
+
 # Opt-in: clear the start-up pause once both services are ready.
 wait_port 19992 || true
 if [ "${DSH_AUTO_RESUME:-0}" = "1" ]; then
