@@ -25,7 +25,7 @@ _SERVE={'proc':None,'lines':None}
 SERVE_HEADER='DSH_BRIDGE_SERVE '
 # Linux deployments drive an isolated X11 container over LAN instead of Hyper-V.
 REMOTE = os.name != 'nt'
-REMOTE_BASE = os.environ.get('DSH_DESKTOP_BASE', 'http://192.168.43.204:19990')
+REMOTE_BASE = os.environ.get('DSH_DESKTOP_BASE', 'http://192.168.1.20:19990')
 REMOTE_TIMEOUT = float(os.environ.get('DSH_DESKTOP_TIMEOUT', '75'))
 
 

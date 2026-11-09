@@ -388,7 +388,7 @@ def own_path(store,raw='',create=False):
     if create:candidate.parent.mkdir(parents=True,exist_ok=True)
     return base,candidate
 
-QQ_BRIDGE=os.environ.get('DSH_QQ_BRIDGE','http://192.168.43.18:13200')
+QQ_BRIDGE=os.environ.get('DSH_QQ_BRIDGE','http://192.168.1.10:13200')
 
 def _outputs_dir(store):
     return Path(store.root)/'image-studio'/'outputs'

@@ -10,7 +10,7 @@ import urllib.request
 
 from space_tools import spec
 
-BASE = 'http://192.168.43.204:19992'
+BASE = 'http://192.168.1.20:19992'
 TOKEN_FILE = 'data/android.token'
 TIMEOUT = 45
 TEXT = {'type': 'string'}
