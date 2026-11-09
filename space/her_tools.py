@@ -12,10 +12,15 @@ OUTPUT_CLIP = 12000
 # 这些命令在前台通常超过 30 秒；直接拒绝并引导到 her_start，
 # 避免模型反复等超时、把输出塞满上下文。
 _LONG_COMMAND = re.compile(
-    r'(^|\s)(?:sleep\s+\d+|pnpm\s+(?:test|install|add|build|run)|npm\s+(?:test|install|ci|run)|'
+    r'(^|\s)(?:sleep\s+[\d.]+|pnpm\s+(?:test|install|add|build|run)|npm\s+(?:test|install|ci|run)|'
     r'yarn\s+(?:test|install|build|run)|npx|pytest|go\s+(?:test|build)|cargo\s+(?:build|test|run)|'
     r'make|cmake|gradle|\.\/gradlew|mvn|apt(?:-get)?\s+.*install|pip3?\s+install|'
-    r'git\s+clone|docker\s+build|podman\s+build|uv\s+(?:sync|pip)|python3?\s+-m\s+pytest)(\s|$)', re.I)
+    r'git\s+clone|docker\s+build|podman\s+build|uv\s+(?:sync|pip)|python3?\s+-m\s+pytest)'
+    r'(?=[\s;|&)]|$)', re.I)
+
+# 递归扫描整个 /home/her 或根目录通常也会超过前台时限，直接引导到 her_start。
+_DEEP_GREP = re.compile(
+    r'(^|\s)(?:grep|rg)\s+[^|;]*\s(?:/home/her/?|/)(?=\s|$)', re.I)
 
 TOOLS = [
     spec('her_list', '列出她电脑上 /home/her 内的目录（最多200项，只返回相对路径）。', {'path': TEXT}),
@@ -24,7 +29,7 @@ TOOLS = [
           'limit': {'type': 'integer', 'minimum': 1, 'maximum': 20000}}, ['path']),
     spec('her_write', '写入她电脑 /home/her 内的文件（单文件≤256KiB），覆盖前保留旧版本；不能写符号链接。',
          {'path': TEXT, 'text': {'type': 'string', 'maxLength': 100000}}, ['path', 'text']),
-    spec('her_run', '在她电脑的容器内按 argv 直接执行（不经 shell），以 root 运行，可安装软件或改系统设置；默认20秒、上限30秒；cwd 只能是 /home/her 内的目录。超过30秒的测试/构建/安装会被拒绝，请改用 her_start 后台启动；输出只保留最后12000字。',
+    spec('her_run', '在她电脑的容器内按 argv 直接执行（不经 shell），以 root 运行，可安装软件或改系统设置；默认20秒、上限30秒；cwd 只能是 /home/her 内的目录。超过30秒的测试/构建/安装会被拒绝，请改用 her_start 后台启动；不要在 her_run 里用 sleep 轮询，等待也请用 her_start + her_read；输出只保留最后12000字。',
          {'argv': {'type': 'array', 'items': {'type': 'string', 'maxLength': 2000},
                    'minItems': 1, 'maxItems': 32},
           'timeout_sec': {'type': 'integer', 'minimum': 1, 'maximum': 30},
@@ -40,7 +45,7 @@ _ENDPOINTS = {'her_list': '/fs/list', 'her_read': '/fs/read', 'her_write': '/fs/
 
 def _long_command(argv):
     joined = ' '.join([os.path.basename(str(argv[0]))] + [str(x) for x in argv[1:]])
-    return bool(_LONG_COMMAND.search(joined))
+    return bool(_LONG_COMMAND.search(joined)) or bool(_DEEP_GREP.search(joined))
 
 
 def _clip_tail(text, limit=OUTPUT_CLIP):
