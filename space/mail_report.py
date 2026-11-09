@@ -116,6 +116,18 @@ def collect(store, start, end):
         tasks = [dict(row) for row in store.db.execute(
             'SELECT id,text,status,time,target,persona FROM tasks WHERE time>=? AND time<=? ORDER BY time',
             (begin, finish))]
+        # 任务结果可能落在时段边界之后（例如 12:00 整点收尾），按任务再补一次，
+        # 否则汇总只能看到“停止”，看不到归宿。
+        if tasks:
+            placeholders = ','.join('?' * len(tasks))
+            seen = {event['seq'] for event in events}
+            for row in store.db.execute(
+                    'SELECT seq,time,kind,task_id,persona,payload FROM events WHERE task_id IN (%s) '
+                    "AND kind IN ('task.result','task.failure','control.hold') ORDER BY seq"
+                    % placeholders, [task['id'] for task in tasks]):
+                if row['seq'] not in seen:
+                    events.append(dict(row))
+            events.sort(key=lambda item: item['seq'])
         memories = [dict(row) for row in store.db.execute(
             'SELECT kind,text,time,persona FROM memory WHERE time>=? AND time<=? ORDER BY time',
             (begin, finish))]
@@ -157,33 +169,59 @@ def collect(store, start, end):
 
 
 def _past_lines(facts):
-    """过去这个时段做了什么：以任务为主，附最后一条结果或停止原因。"""
+    """过去这个时段做了什么：先列完成，再按原因汇总未完成。"""
     tz = facts['tz']
     results = {}
+    holds = {}
     for event in facts['events']:
-        if event['kind'] not in ('task.result', 'task.failure'):
-            continue
         payload = _payload(event)
-        failure = payload.get('failure') or {}
-        text = payload.get('text') or (failure.get('message') if isinstance(failure, dict) else '')
-        if text:
-            results[event['task_id']] = _clean(text, 2000)
+        if event['kind'] in ('task.result', 'task.failure'):
+            results[event['task_id']] = payload
+        elif event['kind'] == 'control.hold':
+            holds[event['task_id']] = payload
+
     lines = []
-    recent = facts['tasks'][-4:]
-    recent_ids = {item['id'] for item in recent}
-    abnormal = [item for item in facts['tasks']
-                if item['status'] in ('failed', 'stopped', 'needs-review', 'uncertain')
-                and item['id'] not in recent_ids][-2:]
-    for task in sorted(recent + abnormal, key=lambda item: item['time']):
-        title = _task_title(task.get('text'))
-        if not title:
-            continue
-        status = TASK_STATUS.get(task['status'], task['status'])
-        line = f"· {_clock(task['time'], tz)}　{status}：{title}"
-        detail = results.get(task['id'])
+    completed = [item for item in facts['tasks'] if item['status'] == 'completed']
+    for task in completed[:6]:
+        detail = _clean((results.get(task['id']) or {}).get('text') or '', 160)
+        line = f"· {_clock(task['time'], tz)}　完成：{_task_title(task.get('text'))}"
         if detail:
             line += '　—— ' + detail
         lines.append(line)
+    if len(completed) > 6:
+        lines.append(f"· 另有 {len(completed) - 6} 个任务完成，未逐条列出。")
+
+    groups = {}
+    for task in facts['tasks']:
+        if task['status'] not in ('failed', 'stopped', 'needs-review', 'uncertain'):
+            continue
+        payload = results.get(task['id']) or {}
+        failure = payload.get('failure') or {}
+        code = str(failure.get('code') or payload.get('reason') or '')
+        hold = holds.get(task['id']) or {}
+        source = str(hold.get('source') or '')
+        if code == 'CANCELLED' or source == 'owner-correction-or-pause':
+            key = '被暂停/取消（设备结果不确定或主人暂停）'
+        elif code == 'OBSERVATION_UNAVAILABLE' or source == 'observation-unavailable':
+            key = '思考观察链路不可用'
+        elif code == 'CONTEXT_ROTATED' or source == 'context-rotation':
+            key = '上下文压缩收尾'
+        elif code == 'RUNTIME_STOPPED':
+            key = '运行时停止'
+        elif code == 'AUTONOMY_WINDOW_ENDED' or source == 'autonomy-window-ended':
+            key = '自主时段结束（正常收尾）'
+        elif task['status'] == 'needs-review':
+            key = '待审阅'
+        elif task['status'] == 'uncertain':
+            key = '待核对'
+        else:
+            key = '其他原因停止'
+        groups.setdefault(key, []).append(task)
+
+    for key, items in sorted(groups.items(), key=lambda pair: -len(pair[1])):
+        lines.append(f"· {key}：{len(items)} 次（{_clock(items[0]['time'], tz)}–"
+                     f"{_clock(items[-1]['time'], tz)}）")
+
     if not lines:
         for item in facts['highlights'][-6:]:
             suffix = ('：' + item['brief']) if item['brief'] else ''
