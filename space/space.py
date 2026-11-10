@@ -995,7 +995,7 @@ class Store:
         value['context_policy']={'new_owner_task':'fresh_native_session',
                                  'current_task':'retain_goal_and_receipts',
                                  'history':'short_index_then_explicit_retrieval',
-                                 'mid_task_rotation':'autonomy_only_soft_rotate_at_78pct_or_90_requests',
+                                 'mid_task_rotation':'autonomy_only_milestone_or_78pct_context',
                                  'default_device':'phone_first_computer_on_demand'}
         value['thinking']=self.observer_status(value['runtime'].get('session_id'))
         return value
