@@ -191,6 +191,45 @@ def _past_lines(facts):
     if len(completed) > 6:
         lines.append(f"· 另有 {len(completed) - 6} 个任务完成，未逐条列出。")
 
+    # 没有完成态任务时，任务列表只剩停止原因，看不出实际做了什么；
+    # 这里从记忆和结果摘要里补一段“留下的实际记录”。
+    if not completed:
+        actions = []
+        seen = set()
+
+        def add(when, text, label, fallback):
+            value = _clean(text, 240)
+            key = value[:36]
+            if not value or key in seen:
+                return
+            seen.add(key)
+            stamp = _moment(when)
+            actions.append((stamp.timestamp() if stamp else fallback, when, label, value))
+
+        for item in facts['memories']:
+            add(item['time'], item['text'], '记忆', 0.0)
+        for task in facts['tasks']:
+            payload = results.get(task['id']) or {}
+            text = str(payload.get('text') or payload.get('summary') or '')
+            if '主动压缩收尾' in text or '原目标' in text:
+                continue
+            add(task['time'], text, '结果', 0.0)
+        actions.sort(key=lambda entry: entry[0])
+        if not actions:
+            # 连记忆和结果都没有时，才退回事件摘要；跳过压缩、运行时这类过程噪音。
+            for item in facts['highlights']:
+                if item['label'] in ('本轮结果', '本轮停止原因', '上下文压缩', '运行时出错'):
+                    continue
+                add(item['time'], item['brief'], item['label'], 1e12)
+        if actions:
+            lines.append('· 没有完成态任务；以下是期间留下的实际记录：')
+            for _stamp, when, label, value in actions[:5]:
+                clock = _clock(when, tz) or str(when or '')
+                lines.append('  · ' + (clock + '　' if clock else '')
+                             + (label + '：' if label else '') + value)
+        else:
+            lines.append('· 这一时段没有完成态任务，也没有留下可读的工作记录。')
+
     groups = {}
     for task in facts['tasks']:
         if task['status'] not in ('failed', 'stopped', 'needs-review', 'uncertain'):
