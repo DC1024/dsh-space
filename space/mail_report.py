@@ -249,6 +249,8 @@ def _past_lines(facts):
             key = '运行时停止'
         elif code == 'AUTONOMY_WINDOW_ENDED' or source == 'autonomy-window-ended':
             key = '自主时段结束（正常收尾）'
+        elif code == 'SUPERSEDED_BY_RESTART':
+            key = '重启时已过期（正常收尾）'
         elif task['status'] == 'needs-review':
             key = '待审阅'
         elif task['status'] == 'uncertain':

@@ -143,7 +143,7 @@ class Store:
                 with self.identity.bind(persona):
                     self.set('active_request', {})
             self.db.execute("UPDATE tasks SET status='uncertain' WHERE status='running'")
-            self.db.execute("UPDATE tasks SET status='needs-review' WHERE status IN ('queued','claimed')")
+            self._reconcile_queue()
         # A container restart interrupts every in-flight model call, so their
         # reservations never receive a usage receipt. Reconcile them at boot
         # instead of letting the upper bounds stay frozen forever.
@@ -157,6 +157,35 @@ class Store:
         from space_tools import StorageQuota
         self.storage_quota=StorageQuota(self)
         self.storage_quota.initialize()
+
+    def _reconcile_queue(self):
+        """重启对账：只保留最近的未派发任务，其余正常收尾，不再一律转待复核。
+
+        以前重启会把所有 queued/claimed 都改成 needs-review，而 needs-review 只有
+        主人手动复核一个出口，反复重启就会持续堆积。现在按是否真正派发过区分：
+        - 已派发过（可能执行了一部分）：保留待复核，不重发；
+        - 未派发且在 30 分钟内：放回队列，恢复活动后继续；
+        - 未派发且更早：按“已被重启取代”收尾，不占待复核。
+        """
+        cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=30)).isoformat()
+        self.db.execute(
+            "UPDATE tasks SET status='needs-review' WHERE status IN ('queued','claimed') "
+            "AND EXISTS (SELECT 1 FROM events e WHERE e.task_id=tasks.id AND e.kind='task.dispatch')")
+        self.db.execute(
+            "UPDATE tasks SET status='queued' WHERE status IN ('queued','claimed') AND time>=?",
+            (cutoff,))
+        stale = [dict(row) for row in self.db.execute(
+            "SELECT id,persona FROM tasks WHERE status IN ('queued','claimed') AND time<?",
+            (cutoff,)).fetchall()]
+        for row in stale:
+            self.db.execute("UPDATE tasks SET status='stopped' WHERE id=?", (row['id'],))
+            with self.identity.bind(row['persona']):
+                self.event('task.result', {
+                    'id': row['id'], 'status': 'stopped', 'reason': 'restart-superseded',
+                    'failure': {'code': 'SUPERSEDED_BY_RESTART',
+                                'message': '重启前未派发且已超过 30 分钟，按过期收尾；不重发，也不占待复核。'},
+                    'tools': [], 'goal_verification': 'not-automatically-verified'},
+                    row['id'], None, source_key='task-result:' + row['id'])
 
     def get(self, key):
         with self.lock:
