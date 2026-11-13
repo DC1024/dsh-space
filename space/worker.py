@@ -260,7 +260,7 @@ def run_bound(store):
                     due=store.db.execute('SELECT time FROM tasks WHERE persona=? AND request_key LIKE ? ORDER BY time DESC LIMIT 1',(store.identity.actor(),'%:autonomy-%')).fetchone()
                 last_due=__import__('datetime').datetime.fromisoformat(due[0]).timestamp() if due else 0
                 # 至少一台自己的设备在线即可（电脑按需连接时 desktop_live 平时不 ready）。
-                interval=max(600,int(store.config.get('idle_seconds',600)))
+                interval=max(600,int(store.config.get('autonomy_interval_seconds',store.config.get('idle_seconds',600))))
                 if store.config.get('autonomy_enabled',False) and not store.get('paused') and cfg.get('ready') and (store.desktop_live.get('ready') or store.phone_live.get('ready')) and resources.get('known') and resources.get('idle_seconds',0)>=store.config['idle_seconds'] and resources.get('available_ram_gb',0)>=store.config['min_available_ram_gb'] and resources.get('cpu_window_ready') and time.time()-last_due>=interval:
                     budget_rule=('预算无上限：只需记录实际花费，不要因为预算数字停止、少做或反复只做状态核对；'
                                  if not store.config.get('budget_limit_enabled',True) else '保留预算要求；')
