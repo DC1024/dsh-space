@@ -12,7 +12,7 @@
   "min_free_gb": 50,
   "max_space_gb": 120,
   "history_quota_gb": 8,
-  "idle_seconds": 600,
+  "idle_seconds": 900,
   "min_available_ram_gb": 3,
   "max_cpu_percent": 50,
   "cpu_window_seconds": 120,
