@@ -13,6 +13,7 @@
   "max_space_gb": 120,
   "history_quota_gb": 8,
   "idle_seconds": 900,
+  "autonomy_interval_seconds": 1800,
   "autonomy_window": {
     "enabled": true,
     "ranges": [
