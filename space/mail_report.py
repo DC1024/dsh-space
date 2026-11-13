@@ -239,8 +239,10 @@ def _past_lines(facts):
         code = str(failure.get('code') or payload.get('reason') or '')
         hold = holds.get(task['id']) or {}
         source = str(hold.get('source') or '')
-        if code == 'CANCELLED' or source == 'owner-correction-or-pause':
-            key = '被暂停/取消（设备结果不确定或主人暂停）'
+        if code == 'CANCELLED' and source == 'device-result-uncertain':
+            key = '设备结果不确定（her_run 超时，全局取消）'
+        elif code == 'CANCELLED' or source == 'owner-correction-or-pause':
+            key = '被暂停/取消（主人暂停或纠正）'
         elif code == 'OBSERVATION_UNAVAILABLE' or source == 'observation-unavailable':
             key = '思考观察链路不可用'
         elif code == 'CONTEXT_ROTATED' or source == 'context-rotation':

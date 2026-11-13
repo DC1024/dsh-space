@@ -303,9 +303,9 @@ def run_bound(store):
                            and store.resources().get('idle_seconds',0)<store.config['idle_seconds'])
                 owner_waiting=is_auto and not cancelled and owner_message_waiting(store)
                 # 设备回执不确定时 _mark_unknown 会全局暂停；此时两边的任务都应按
-                # “设备结果不确定”收尾，而不是含糊的“纠正/暂停”。
-                device_unknown=(task.get('target') in ('desktop','phone')
-                                and isinstance(store.get('auto_recover_at'), (int,float)))
+                # “设备结果不确定”收尾，而不是含糊的“纠正/暂停”。annotate 不区分
+                # 目标：her_run 超时会把正在跑的对话/自主任务一起取消。
+                device_unknown=isinstance(store.get('auto_recover_at'), (int,float))
                 store.config=json.loads((store.root/'config.json').read_text(encoding='utf-8-sig'))
                 held=store.config.get('owner_hold',{}).get('paused') or not store.config.get('dispatch_enabled',False) or (not store.get('parallel_enabled') and store.identity.actor()!=store.identity.active())
                 bootstrap=(time.monotonic()-started_at<30

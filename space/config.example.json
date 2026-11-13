@@ -70,7 +70,7 @@
     "phone_accounting_space_root": "C:\\dsh-space\\DSH专属空间_v01"
   },
   "context": {
-    "input_byte_limit": 640000,
+    "input_byte_limit": 1048576,
     "max_steps": 0,
     "soft_ratio": 0.7
   },
