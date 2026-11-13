@@ -13,6 +13,13 @@
   "max_space_gb": 120,
   "history_quota_gb": 8,
   "idle_seconds": 900,
+  "autonomy_window": {
+    "enabled": true,
+    "ranges": [
+      {"start": "18:00", "end": "09:00"},
+      {"start": "12:00", "end": "14:00"}
+    ]
+  },
   "min_available_ram_gb": 3,
   "max_cpu_percent": 50,
   "cpu_window_seconds": 120,
