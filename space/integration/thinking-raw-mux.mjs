@@ -59,7 +59,7 @@ export async function runThinkingRawMux(rawConfig,deps={}){
  const emit=deps.emit||((value)=>process.stdout.write(JSON.stringify(value)+'\n'));
  const now=deps.now||(()=>new Date().toISOString());
  const uuid=deps.uuid||randomUUID;
- const timeoutMs=deps.timeoutMs??15*60*1000,authTimeoutMs=deps.authTimeoutMs??15000;
+ const timeoutMs=deps.timeoutMs??2*60*60*1000,authTimeoutMs=deps.authTimeoutMs??15000;
  check(Number.isSafeInteger(timeoutMs)&&timeoutMs>0&&Number.isSafeInteger(authTimeoutMs)&&authTimeoutMs>0,'TIMEOUT_INVALID');
  const abort=new AbortController();let socket,client,finished=false,opened=false,snapshotSeen=false,listenerCleanup=()=>{},timer,authTimer;
  let resolveDone;

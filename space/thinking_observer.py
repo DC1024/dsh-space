@@ -97,7 +97,7 @@ def validate_binding(value, *, legacy_sids=(), allowed_ports=(19992,)):
 class ThinkingObserverManager:
     def __init__(self, *, project_root=ROOT, binding_file=BINDING_FILE, archive_root=ARCHIVE_ROOT,
                  max_bytes=MAX_ARCHIVE_BYTES, allowed_ports=(19992,), poll_seconds=2,
-                 process_factory=subprocess.Popen, autostart=True, backlog_limit_ms=5000,
+                 process_factory=subprocess.Popen, autostart=True, backlog_limit_ms=8000,
                  buffer_options=None, discover_seconds=0.25):
         self.project_root, self.binding_file, self.archive_root = Path(project_root), Path(binding_file), Path(archive_root)
         self.max_bytes, self.allowed_ports, self.poll_seconds = max_bytes, tuple(allowed_ports), poll_seconds
