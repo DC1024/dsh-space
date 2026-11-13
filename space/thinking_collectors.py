@@ -38,6 +38,8 @@ class SessionCollector:
         self.transport_state = 'waiting'
         self.follow_ready = False
         self.ready_fingerprint = None
+        # 用于重连宽限：mux 正常续连只需一两秒，不能把这段时间当成观察失效。
+        self.last_connected_mono = None
         self.buffer = PendingFrames(**manager.buffer_options)
         self.cache = None
         self.cache_error = None
@@ -93,7 +95,9 @@ class SessionCollector:
         freshness = self.track_freshness()
         with self.lock:
             return {'transport': self.transport_state, 'follow_ready': self.follow_ready,
-                    'ready_fingerprint': self.ready_fingerprint, 'cache': self.cache,
+                    'ready_fingerprint': self.ready_fingerprint,
+                    'last_connected_mono': self.last_connected_mono,
+                    'cache': self.cache,
                     'cache_error': self.cache_error,
                     'ingest': dict(self.last_batch_metrics) if self.last_batch_metrics else None,
                     'freshness': {**freshness, 'lastIngestTime': self.last_ingest_time or freshness['lastIngestTime']}}
@@ -224,6 +228,8 @@ class SessionCollector:
                         self.transport_state = message['state']
                         if message['state'] != 'connected':
                             self.follow_ready = False
+                        else:
+                            self.last_connected_mono = time.monotonic()
                     if not buffer.put(message, stop=self.stop_event):
                         break
                 else:

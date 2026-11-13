@@ -21,6 +21,14 @@ BINDING_FILE = ROOT / 'data/runtime-binding.public.json'
 ARCHIVE_ROOT = ROOT / 'data/observations'
 NODE = os.environ.get('DSH_NODE') or shutil.which('node') or 'node'
 MAX_ARCHIVE_BYTES = int(os.environ.get('DSH_THINKING_MAX_BYTES', str(1 * 1024 ** 3)))
+# mux 断开后重连通常只要一两秒；这段时间仍按可观察处理，避免把正常续连
+# 记成观察失效。真断连超过这个窗口后仍旧照常报错。
+RECONNECT_GRACE_SECONDS = float(os.environ.get('DSH_THINKING_GRACE_SECONDS', '10'))
+# 归档因容量暂停后，按这个间隔检查一次能否恢复（清理器腾出空间后自动接上）。
+ARCHIVE_RECHECK_SECONDS = float(os.environ.get('DSH_THINKING_RECHECK_SECONDS', '60'))
+# 只有这些状态说明“链路断了”，宽限期才成立；模型自己要求暂停时不能放行。
+DISCONNECT_CODES = {'NATIVE_CONNECTING', 'NATIVE_DISCONNECTED', 'NATIVE_ERROR',
+                    'NATIVE_FOLLOW_ENDED', 'NATIVE_SOCKET_CLOSED', 'MODEL_UNKNOWN'}
 SID = re.compile(r'^session-[A-Za-z0-9][A-Za-z0-9_-]{0,179}$')
 
 
@@ -36,6 +44,27 @@ def utc_now():
 
 def _read_json(path):
     return json.loads(Path(path).read_text('utf-8-sig'))
+
+
+def reconnect_grace(active, connected, snapshot, fingerprint, native, now=None):
+    """断连后短时间内仍按可观察处理，用来吸收 mux 的一两秒续连。"""
+    if not active or connected:
+        return False
+    if snapshot.get('ready_fingerprint') != fingerprint:
+        return False
+    recent = snapshot.get('last_connected_mono')
+    if not isinstance(recent, (int, float)):
+        return False
+    if now is None:
+        now = time.monotonic()
+    if not 0 <= now - recent <= RECONNECT_GRACE_SECONDS:
+        return False
+    if snapshot['freshness']['pendingFrames']:
+        return False
+    if not snapshot['cache'] or snapshot['cache_error']:
+        return False
+    return (not native.get('requiresPause')
+            or str(native.get('code')) in DISCONNECT_CODES)
 
 
 def _atomic_json(path, value):
@@ -113,6 +142,7 @@ class ThinkingObserverManager:
         self.binding_error = 'FORMAL_SESSION_NOT_REGISTERED'
         self._store = None
         self.archive_paused = False
+        self._archive_check_at = 0.0
         self.registry_file, self.registry = self.archive_root / 'registered-sessions.json', {}
         if self.registry_file.exists():
             data = _read_json(self.registry_file)
@@ -194,6 +224,30 @@ class ThinkingObserverManager:
             collectors = list(self.collectors.values())
         for collector in collectors:
             collector.stop()
+
+    def _resume_archive_if_possible(self):
+        """容量回落后解除归档暂停，让采集器重新接上。
+
+        meta.paused 一旦写入就不会自己清除；没有这一步，清理器腾出空间后
+        观察链路仍会永久停摆，只能靠重启容器。
+        """
+        with self.lock:
+            if not self.archive_paused:
+                return False
+            if time.monotonic() - self._archive_check_at < ARCHIVE_RECHECK_SECONDS:
+                return False
+            self._archive_check_at = time.monotonic()
+        try:
+            resumed = self.store.resume_if_capacity_ok()
+        except Exception:
+            return False
+        if not resumed:
+            return False
+        with self.lock:
+            self.archive_paused = False
+        # 旧采集器的 stop_event 仍是 set 状态，_run 里的 _collector() 会自动
+        # 替换成新实例并重新接上，不需要手动清除。
+        return True
 
     def refresh_binding(self):
         # Only registry I/O is serialized here. The high-volume writer never
@@ -282,10 +336,16 @@ class ThinkingObserverManager:
             binding_error = self.binding_error
         connected = bool(active and snapshot['follow_ready'] and snapshot['transport'] == 'connected'
                          and snapshot['ready_fingerprint'] == registration['fingerprint'])
+        # 重连宽限：断开不足 RECONNECT_GRACE_SECONDS、没有未提交帧、指纹未变时，
+        # 仍按可观察处理。超窗后自动失效，真断连照常上报。
+        grace = reconnect_grace(active, connected, snapshot,
+                                registration['fingerprint'], native)
+        if grace:
+            connected = True
         blocked = bool(info.get('paused') or self.archive_paused)
         lagged = snapshot['freshness']['backlogAgeMs'] >= self.backlog_limit_ms
         ready = bool(connected and not lagged and not blocked and not snapshot['cache_error'] and
-                     snapshot['cache'] and not native.get('requiresPause'))
+                     snapshot['cache'] and (grace or not native.get('requiresPause')))
         freshness = {**snapshot['freshness'], 'ready': ready, 'thresholdMs': self.backlog_limit_ms,
                      'clock': 'local-monotonic-receive-through-commit'}
         if blocked:
@@ -358,6 +418,7 @@ class ThinkingObserverManager:
     def _run(self):
         while not self.stop_event.is_set():
             self.refresh_binding()
+            self._resume_archive_if_possible()
             with self.lock:
                 bindings = list(self.bindings.values())
             for binding in bindings:

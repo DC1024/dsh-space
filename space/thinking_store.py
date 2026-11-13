@@ -240,6 +240,30 @@ class ThinkingStore:
                 con.rollback()
                 raise
 
+    def resume_if_capacity_ok(self, *, threshold=0.8):
+        """容量回落后解除容量暂停；返回是否解除。
+
+        容量暂停一旦写入 meta.paused 就不会自己恢复，清理器删掉旧记录、库文件被
+        收缩后仍会永久拒绝写入。这里只在占用降到上限的 threshold 以下时解除，
+        避免刚过线就恢复、又立刻被暂停来回抖动。
+        """
+        with self._connection() as con:
+            if not self._paused(con):
+                return False
+            con.execute("BEGIN IMMEDIATE")
+            if not self._paused(con):
+                con.rollback()
+                return False
+            limit = self.max_bytes - self.reserve_bytes
+            used = self._used_bytes(con)
+            if used > limit * threshold:
+                con.rollback()
+                return False
+            con.execute("UPDATE meta SET value='false' WHERE key='paused'")
+            con.execute("DELETE FROM meta WHERE key IN ('pauseReason','pausedAt')")
+            con.commit()
+            return True
+
     def info(self, sid, *, include_counts=True):
         sid = _key(sid, "session id", 512)
         with self._connection() as con:
