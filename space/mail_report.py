@@ -78,10 +78,11 @@ def _clean(text, limit=0):
     return value
 
 
-def _task_title(text):
+def _task_title(text, persona=''):
     value = _clean(text)
     if value.startswith(AUTONOMY_PREFIX):
-        return '自主探索'
+        who = f'（{persona}）' if persona else ''
+        return f'自主探索{who}'
     return _clean(value, 240)
 
 
@@ -117,13 +118,14 @@ def collect(store, start, end):
             'SELECT id,text,status,time,target,persona FROM tasks WHERE time>=? AND time<=? ORDER BY time',
             (begin, finish))]
         # 任务结果可能落在时段边界之后（例如 12:00 整点收尾），按任务再补一次，
-        # 否则汇总只能看到“停止”，看不到归宿。
+        # 否则汇总只能看到“停止”，看不到归宿。待审阅/自动核对等说明也补齐。
         if tasks:
             placeholders = ','.join('?' * len(tasks))
             seen = {event['seq'] for event in events}
             for row in store.db.execute(
                     'SELECT seq,time,kind,task_id,persona,payload FROM events WHERE task_id IN (%s) '
-                    "AND kind IN ('task.result','task.failure','control.hold') ORDER BY seq"
+                    "AND kind IN ('task.result','task.failure','control.hold',"
+                    "'task.auto-reviewed','task.reconciled','task.reclassified') ORDER BY seq"
                     % placeholders, [task['id'] for task in tasks]):
                 if row['seq'] not in seen:
                     events.append(dict(row))
@@ -169,27 +171,46 @@ def collect(store, start, end):
 
 
 def _past_lines(facts):
-    """过去这个时段做了什么：先列完成，再按原因汇总未完成。"""
+    """过去这个时段做了什么：列出全部完成任务，再逐条说明未完成/待审阅。"""
     tz = facts['tz']
     results = {}
     holds = {}
+    reviews = {}
+    reconciled = {}
+    reclassified = {}
     for event in facts['events']:
         payload = _payload(event)
-        if event['kind'] in ('task.result', 'task.failure'):
-            results[event['task_id']] = payload
-        elif event['kind'] == 'control.hold':
-            holds[event['task_id']] = payload
+        kind = event['kind']
+        tid = event.get('task_id')
+        if kind in ('task.result', 'task.failure'):
+            prev = results.get(tid) or {}
+            merged = dict(prev)
+            merged.update(payload)
+            if isinstance(prev.get('failure'), dict) and isinstance(payload.get('failure'), dict):
+                merged['failure'] = {**prev['failure'], **payload['failure']}
+            results[tid] = merged
+        elif kind == 'control.hold':
+            holds[tid] = payload
+        elif kind == 'task.auto-reviewed':
+            reviews[tid] = payload
+        elif kind == 'task.reconciled':
+            reconciled[tid] = payload
+        elif kind == 'task.reclassified':
+            reclassified[tid] = payload
 
     lines = []
     completed = [item for item in facts['tasks'] if item['status'] == 'completed']
-    for task in completed[:6]:
-        detail = _clean((results.get(task['id']) or {}).get('text') or '', 160)
-        line = f"· {_clock(task['time'], tz)}　完成：{_task_title(task.get('text'))}"
+    for task in completed:
+        payload = results.get(task['id']) or {}
+        detail = _clean(payload.get('text') or payload.get('summary') or '', 240)
+        who = task.get('persona') or ''
+        line = f"· {_clock(task['time'], tz)}　完成：{_task_title(task.get('text'), who)}"
+        if who and who not in _task_title(task.get('text'), who):
+            line += f'（{who}）'
+        line += f'　[{task["id"]}]'
         if detail:
             line += '　—— ' + detail
         lines.append(line)
-    if len(completed) > 6:
-        lines.append(f"· 另有 {len(completed) - 6} 个任务完成，未逐条列出。")
 
     # 没有完成态任务时，任务列表只剩停止原因，看不出实际做了什么；
     # 这里从记忆和结果摘要里补一段“留下的实际记录”。
@@ -230,40 +251,86 @@ def _past_lines(facts):
         else:
             lines.append('· 这一时段没有完成态任务，也没有留下可读的工作记录。')
 
-    groups = {}
-    for task in facts['tasks']:
-        if task['status'] not in ('failed', 'stopped', 'needs-review', 'uncertain'):
-            continue
-        payload = results.get(task['id']) or {}
-        failure = payload.get('failure') or {}
-        code = str(failure.get('code') or payload.get('reason') or '')
-        hold = holds.get(task['id']) or {}
-        source = str(hold.get('source') or '')
-        if code == 'CANCELLED' and source == 'device-result-uncertain':
-            key = '设备结果不确定（her_run 超时，全局取消）'
-        elif code == 'CANCELLED' or source == 'owner-correction-or-pause':
-            key = '被暂停/取消（主人暂停或纠正）'
-        elif code == 'OBSERVATION_UNAVAILABLE' or source == 'observation-unavailable':
-            key = '思考观察链路不可用'
-        elif code == 'CONTEXT_ROTATED' or source == 'context-rotation':
-            key = '上下文压缩收尾'
-        elif code == 'RUNTIME_STOPPED':
-            key = '运行时停止'
-        elif code == 'AUTONOMY_WINDOW_ENDED' or source == 'autonomy-window-ended':
-            key = '自主时段结束（正常收尾）'
-        elif code == 'SUPERSEDED_BY_RESTART':
-            key = '重启时已过期（正常收尾）'
-        elif task['status'] == 'needs-review':
-            key = '待审阅'
-        elif task['status'] == 'uncertain':
-            key = '待核对'
-        else:
-            key = '其他原因停止'
-        groups.setdefault(key, []).append(task)
+    abnormal = [task for task in facts['tasks']
+                if task['status'] in ('failed', 'stopped', 'needs-review', 'uncertain')]
+    if abnormal:
+        groups = {}
+        for task in abnormal:
+            payload = results.get(task['id']) or {}
+            failure = payload.get('failure') or {}
+            code = str(failure.get('code') or payload.get('reason') or '')
+            hold = holds.get(task['id']) or {}
+            source = str(hold.get('source') or '')
+            if code == 'CANCELLED' and source == 'device-result-uncertain':
+                key = '设备结果不确定（her_run 超时，全局取消）'
+            elif code == 'CANCELLED' or source == 'owner-correction-or-pause':
+                key = '被暂停/取消（主人暂停或纠正）'
+            elif code == 'OBSERVATION_UNAVAILABLE' or source == 'observation-unavailable':
+                key = '思考观察链路不可用'
+            elif code == 'CONTEXT_ROTATED' or source == 'context-rotation':
+                key = '上下文压缩收尾'
+            elif code == 'RUNTIME_STOPPED':
+                key = '运行时停止'
+            elif code == 'AUTONOMY_WINDOW_ENDED' or source == 'autonomy-window-ended':
+                key = '自主时段结束（正常收尾）'
+            elif code == 'SUPERSEDED_BY_RESTART':
+                key = '重启时已过期（正常收尾）'
+            elif task['status'] == 'needs-review':
+                key = '待审阅'
+            elif task['status'] == 'uncertain':
+                key = '待核对'
+            else:
+                key = '其他原因停止'
+            groups.setdefault(key, []).append(task)
 
-    for key, items in sorted(groups.items(), key=lambda pair: -len(pair[1])):
-        lines.append(f"· {key}：{len(items)} 次（{_clock(items[0]['time'], tz)}–"
-                     f"{_clock(items[-1]['time'], tz)}）")
+        lines.append('· 未完成/待处理任务汇总：')
+        for key, items in sorted(groups.items(), key=lambda pair: -len(pair[1])):
+            lines.append(f"  · {key}：{len(items)} 次（{_clock(items[0]['time'], tz)}–"
+                         f"{_clock(items[-1]['time'], tz)}）")
+        lines.append('· 未完成/待处理任务明细：')
+        for task in abnormal:
+            payload = results.get(task['id']) or {}
+            failure = payload.get('failure') or {}
+            hold = holds.get(task['id']) or {}
+            review = reviews.get(task['id']) or {}
+            rec = reconciled.get(task['id']) or {}
+            reclass = reclassified.get(task['id']) or {}
+            code = str(failure.get('code') or payload.get('reason') or '')
+            reason = str(payload.get('reason') or failure.get('reason') or '')
+            message = _clean(failure.get('message') or payload.get('message') or '', 320)
+            status = TASK_STATUS.get(task['status'], task['status'])
+            who = task.get('persona') or ''
+            detail = f"  · {_clock(task['time'], tz)}　{status}：{_task_title(task.get('text'), who)}"
+            if who and who not in _task_title(task.get('text'), who):
+                detail += f'（{who}）'
+            detail += f'　[{task["id"]}]'
+            lines.append(detail)
+            parts = []
+            if code:
+                parts.append(f'原因码：{code}')
+            if reason and reason != code:
+                parts.append(f'原因：{reason}')
+            hold_src = str(hold.get('source') or '')
+            hold_reason = str(hold.get('reason') or '')
+            if hold_src:
+                parts.append(f'暂停来源：{hold_src}')
+            if hold_reason and hold_reason not in (reason, code):
+                parts.append(f'暂停原因：{hold_reason}')
+            if message:
+                parts.append('说明：' + message)
+            if review.get('message'):
+                parts.append('自动核对：' + _clean(review.get('message'), 240))
+            if rec.get('message'):
+                parts.append('核对结果：' + _clean(rec.get('message'), 240))
+            if rec.get('reason'):
+                parts.append('核对回执：' + _clean(rec.get('reason'), 240))
+            if reclass.get('message'):
+                parts.append('补注：' + _clean(reclass.get('message'), 240))
+            result_text = _clean(payload.get('text') or payload.get('summary') or '', 240)
+            if result_text and result_text != message:
+                parts.append('结果：' + result_text)
+            if parts:
+                lines.append('    ' + '；'.join(parts))
 
     if not lines:
         for item in facts['highlights'][-6:]:
