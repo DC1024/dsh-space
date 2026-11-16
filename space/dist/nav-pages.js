@@ -85,6 +85,7 @@
     markActive(page);
     if (page === 'schedule' && window.DshSchedule) window.DshSchedule.activate();
     if (page === 'goals' && window.DshGoals) window.DshGoals.activate();
+    if (page === 'requests' && window.DshProposals) window.DshProposals.activate();
     if (page === 'memory' && typeof window.loadMemories === 'function') window.loadMemories();
   }
 

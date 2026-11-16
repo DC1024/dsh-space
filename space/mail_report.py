@@ -40,6 +40,10 @@ KIND_LABEL = {
     'phone.failed': '手机动作未完成', 'parallel.changed': '并发模式已变更',
     'schedule.report': '时段汇报', 'schedule.mail_test': '测试邮件',
     'reasoning.request': '开始思考', 'reasoning.selected': '思考模型已选定',
+    'proposal.submitted': '方案已提交', 'proposal.approved': '方案已批准', 'proposal.rejected': '方案未实施',
+    'proposal.revise_requested': '方案待修订', 'proposal.released': '方案已放行', 'proposal.terminated': '方案已终止',
+    'proposal.stalled': '方案执行停滞', 'proposal.stalled_mail': '停滞提醒邮件', 'proposal.completed': '方案已完成',
+    'proposal.progress': '方案推进记录',
 }
 TASK_STATUS = {
     'completed': '完成', 'stopped': '停止', 'failed': '失败', 'running': '进行中',
@@ -487,6 +491,62 @@ def _block(title, items):
 
 def _html(text):
     return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def compose_proposal(store, proposal, kind='proposal'):
+    tz = ZoneInfo(store.config['timezone'])
+    now = dt.datetime.now(tz)
+    title = str(proposal.get('title') or '未命名方案')
+    version = proposal.get('version', 1)
+    status = proposal.get('status', '')
+    pid = proposal.get('id', '')
+    prefix = {'proposal': '方案待审阅', 'revision': '方案已修订待审阅', 'stalled': '方案执行停滞需处理'}.get(kind, '方案通知')
+    subject = f"[小鲸鱼] {prefix} v{version}：{title[:40]}"
+    who = {'biao': '表人格', 'li': '里人格'}.get(proposal.get('persona'), proposal.get('persona', ''))
+    target = {'assistant': '按需选用设备', 'dialogue': '只对话与记忆', 'phone': '她的手机', 'desktop': '专属 Windows'}.get(proposal.get('target'), proposal.get('target', ''))
+    note = proposal.get('owner_note') or ''
+    streak = proposal.get('failure_streak', 0)
+    threshold = proposal.get('stall_threshold', 3)
+
+    def sec(name, body):
+        body = '' if body is None else str(body)
+        return ('<h3 style="margin:16px 0 6px;font-size:14px">' + _html(name) + '</h3>'
+                '<div style="white-space:pre-wrap;line-height:1.7;font-size:13px;color:#333a45;background:#fbfcfd;border:1px solid #e6e9ee;border-radius:8px;padding:10px 12px">'
+                + _html(body) + '</div>')
+
+    intro = '请在控制台「需要你决定」中选择：实施 / 不实施 / 提交修改意见。邮件回复不会被系统识别为指令。'
+    if kind == 'stalled':
+        intro = (f'该方案已连续失败/停滞 {streak} 次（阈值 {threshold}）。为避免卡住，系统已暂停自动推进。'
+                 '请在控制台选择：手动放行继续 / 终止方案 / 提交修改意见。邮件回复不会被系统识别为指令。')
+    elif kind == 'revision':
+        intro = '空间已根据你的修改意见更新方案，请在控制台重新决定：实施 / 不实施 / 继续修改。邮件回复不会被系统识别为指令。'
+
+    blocks = [
+        '<p style="margin:0 0 10px;line-height:1.7;color:#333a45">' + _html(intro) + '</p>',
+        ('<p style="margin:0 0 10px;font-size:12px;color:#6c7480">方案编号：' + _html(pid)
+         + '　版本：v' + _html(str(version)) + '　人格：' + _html(who)
+         + '　执行端：' + _html(target) + '　时间：' + _html(now.strftime('%Y-%m-%d %H:%M')) + '</p>'),
+        sec('为什么', proposal.get('why')),
+        sec('怎么做', proposal.get('how')),
+        sec('有什么用', proposal.get('benefit')),
+    ]
+    if note:
+        blocks.append(sec('主人修改意见 / 备注', note))
+
+    text_parts = [subject, intro, f'方案编号: {pid}  版本: v{version}  人格: {who}  执行端: {target}',
+                  '', '【为什么】', str(proposal.get('why') or ''), '', '【怎么做】', str(proposal.get('how') or ''),
+                  '', '【有什么用】', str(proposal.get('benefit') or '')]
+    if note:
+        text_parts.extend(['', '【主人修改意见/备注】', str(note)])
+    text = '\n'.join(text_parts)
+
+    html = ('<div style="font-family:-apple-system,Segoe UI,Microsoft YaHei,sans-serif;max-width:760px;'
+            'margin:0 auto;color:#1f2430;padding:8px 4px">'
+            '<h2 style="margin:0 0 8px;font-size:18px">' + _html(subject.replace('[小鲸鱼] ', '')) + '</h2>'
+            + ''.join(blocks) +
+            '<p style="margin:18px 0 0;font-size:12px;color:#8a919c">本邮件由小鲸鱼专属空间自动发送；请在控制台操作，勿直接邮件回复指令。</p>'
+            '</div>')
+    return subject, text, html
 
 
 def deliver(mail, subject, text, html):

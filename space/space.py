@@ -157,6 +157,8 @@ class Store:
         from space_tools import StorageQuota
         self.storage_quota=StorageQuota(self)
         self.storage_quota.initialize()
+        import proposals as _proposals
+        self.proposals = _proposals
 
     def _reconcile_queue(self):
         """重启对账：只保留最近的未派发任务，其余正常收尾，不再一律转待复核。
@@ -1502,6 +1504,9 @@ def handler(store):
                 return self.send(owner_settings.settings_payload(store, csrf))
             if path.path == '/api/goals':
                 return self.send(owner_goals.payload(store) | {'csrf': csrf})
+            if path.path == '/api/proposals':
+                import proposals
+                return self.send(proposals.payload(store) | {'csrf': csrf})
             if path.path == '/api/owner/persona':
                 return self.send(owner_settings.persona_payload(store))
             if path.path == '/api/memory':
@@ -1628,6 +1633,7 @@ def handler(store):
                      '/nav-pages.css': ('nav-pages.css', 'text/css; charset=utf-8'),
                      '/nav-pages.js': ('nav-pages.js', 'text/javascript; charset=utf-8'),
                      '/goals.js': ('goals.js', 'text/javascript; charset=utf-8'),
+                     '/proposals.js': ('proposals.js', 'text/javascript; charset=utf-8'),
                      '/schedule.js': ('schedule.js', 'text/javascript; charset=utf-8'),
                      '/phone-panel.js': ('phone-panel.js', 'text/javascript; charset=utf-8'),
                      '/uuid-polyfill.js': ('uuid-polyfill.js', 'text/javascript; charset=utf-8')}
@@ -1682,6 +1688,9 @@ def handler(store):
                     result = owner_settings.save(store, body)
                 elif self.path == '/api/goals':
                     result = owner_goals.mutate(store, body)
+                elif self.path == '/api/proposals':
+                    import proposals
+                    result = proposals.mutate(store, body)
                 elif self.path == '/api/owner/persona':
                     result = owner_settings.save_persona(store, body)
                 elif self.path == '/api/memory':

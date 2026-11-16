@@ -21,6 +21,10 @@
       {"start": "12:00", "end": "14:00"}
     ]
   },
+  "proposal": {
+    "enabled": true,
+    "stall_threshold": 3
+  },
   "min_available_ram_gb": 3,
   "max_cpu_percent": 50,
   "cpu_window_seconds": 120,
